@@ -937,3 +937,66 @@ So the remaining hoist for `extensions/claude/` is exactly: `src/popup/**`, `src
 `src/content.js`, `src/lib/markdown.js`, `src/lib/filename.js`, `src/lib/html2md.js` — plus the
 one-line relative import at the top of `extensions/claude/src/lib/dom-scrape.js` that currently
 reaches out to `../../../../extension/src/lib/html2md.js`. Nothing else blocks a loadable build.
+
+## Agent A — DOM fallback rewritten after the coordinator's live 101-message measurement
+
+The measurement: on a real conversation with **101 messages in the active branch**, fully loaded,
+`article[data-testid^="conversation-turn-"]` matched **0** nodes, `.markdown`/`.prose` **0**,
+`[data-message-author-role]` **2** — and only **7 turns existed in the DOM at all**, at
+non-contiguous indices (turn-2, 4, 12, 13, …). My fallback would have written a 7 % file that
+looked complete. Rewritten; `dom-scrape.js` is new from the selectors up.
+
+**The structural insight.** "Scroll to the top, then read" cannot work here — scrolling up
+*unmounts* the bottom while mounting the top, so there is no instant at which the whole
+conversation is in the document. The fallback now **harvests**: it rewinds to the top to page in
+history, then sweeps down in `0.75 × clientHeight` steps, converting each turn to Markdown *at the
+moment it is mounted*, keyed by `data-turn-id`, and finally reassembles in `conversation-turn-N`
+order. A simulated virtualised transcript (101 turns, ~8 mounted at a time) is in the tests and
+captures **101 of 101**; the old code captures 7 of it.
+
+**Selectors, all fall-through.** Turns: `section[data-testid^="conversation-turn-"]` →
+`[data-testid^="conversation-turn-"]` → `[data-turn-id]` → legacy `article[...]` →
+`[data-message-author-role]`. Role: `data-turn` → `[data-message-author-role]` (attr, then
+descendant) → nested `[data-turn]` → structural class hints → **null, counted and warned about**.
+Id: `data-turn-id` → `data-message-id`. Body: `.markdown`/`.prose`/`[data-message-content]` →
+`.text-message` → `deepestTextContainer()`, which descends through single-child wrappers so the
+hashed CSS-module names (`fKQ0lq_Layout`, `WlXitW_TransitionGroupChild`) are never referenced.
+
+**The localised-label trap is closed.** `h4.sr-only` renders "ChatGPT сказал:" on this account.
+Role is never derived from it, and `html2md.js` now skips `.sr-only` / `.visually-hidden`
+elements outright, so the label cannot leak into a message either. There is a test asserting no
+`сказал` and no localised copy-button text survives. **Note for Agents D/E/F: this `sr-only` skip
+is in the shared `html2md.js`** — it is generically correct for a transcript export, but shout if
+your platform puts real content in an `sr-only` node.
+
+**Failing honestly (the point of the exercise).** `completenessReport(entries)` compares captured
+turns against what the indices imply and emits a shouty `INCOMPLETE EXPORT — captured M of about
+K turns …` listing the missing indices, plus a separate warning when the transcript starts above
+turn 2 (missing head). On the coordinator's observed 2/4/12/13 sample it reports "captured 4 of
+about 12" and names all eight gaps. `scrapeConversation()` also accepts `expectedMessageCount`,
+which `extract.js` fills from the API result when the API answered but produced nothing visible.
+Silence now requires an actually complete harvest.
+
+**Scroll loop.** Cap raised to 80 rounds; the two stall conditions are checked separately
+(`count stopped growing` and `scrollTop stopped changing`), because a frozen scroller with
+arriving turns and a moving scroller with no new turns are different failures. Hitting the cap,
+or never reaching the top, is a hard warning. `findScrollContainer()` now collects every
+scrollable candidate — ancestors of the first turn plus the selector list — and picks the one with
+the largest `scrollHeight`; tested against both measured candidates (transcript div 4118/812 vs
+`main#main` 4066/760) and against the sizes flipped, so the decision follows measurement rather
+than selector order.
+
+`test/extract.test.mjs` is now 59 tests (76 including `html2md`), all green.
+
+### Still unverifiable without a live session
+
+1. Whether the real mounted window is always **≥ the viewport**. My sweep step is
+   `0.75 × clientHeight`, which guarantees overlap only under that assumption. If ChatGPT ever
+   mounts less than a viewport of content, the sweep can skip turns — it will *say so* rather than
+   hide it, but the fix would be to step by the height of the last mounted turn instead.
+2. Whether scrolling a detached/overlayed transcript (Cloudflare interstitial, error pane) still
+   fires ChatGPT's loader at all.
+3. Whether `data-turn` ever carries values beyond `user`/`assistant` (e.g. tool turns).
+   Anything unrecognised is currently counted as an unknown role and warned about, not guessed.
+4. Real-world timing: `waitMs` 220 with 80 rewind rounds plus a sweep is up to ~40 s on a very
+   long chat. Acceptable for a fallback that now rarely runs, but untuned against a real network.
