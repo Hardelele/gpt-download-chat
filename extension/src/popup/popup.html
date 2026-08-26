@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Chat2MD</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="head">
+      <span class="mark" aria-hidden="true">MD</span>
+      <h1>Chat2MD</h1>
+    </header>
+
+    <main id="main">
+      <!-- busy -->
+      <section class="pane" id="pane-loading" data-pane="loading">
+        <div class="spinner" role="status" aria-label="Reading conversation"></div>
+        <p class="muted" id="loading-text">Reading this conversation…</p>
+      </section>
+
+      <!-- wrong page -->
+      <section class="pane" id="pane-idle" data-pane="idle" hidden>
+        <p class="lead" id="idle-title">Not a ChatGPT conversation</p>
+        <p class="muted" id="idle-text">
+          Open a chat on <b>chatgpt.com</b>, then click the Chat2MD icon again.
+        </p>
+      </section>
+
+      <!-- failure -->
+      <section class="pane" id="pane-error" data-pane="error" hidden>
+        <p class="lead">Could not read this chat</p>
+        <p class="muted err" id="error-text"></p>
+        <button class="btn btn-secondary" id="retry" type="button">Try again</button>
+      </section>
+
+      <!-- ready -->
+      <section class="pane" id="pane-ready" data-pane="ready" hidden>
+        <h2 class="chat-title" id="chat-title"></h2>
+        <p class="meta" id="chat-meta"></p>
+
+        <div class="notice" id="warnings" hidden>
+          <b>Heads up</b>
+          <ul id="warning-list"></ul>
+        </div>
+
+        <div class="actions">
+          <button class="btn btn-primary" id="download" type="button">Download .md</button>
+          <button class="btn btn-secondary" id="copy" type="button">Copy to clipboard</button>
+        </div>
+        <p class="status" id="status" role="status" aria-live="polite"></p>
+
+        <details class="options" id="options">
+          <summary>Options</summary>
+          <div class="option-grid">
+            <label class="row">
+              <input type="checkbox" id="opt-frontmatter" />
+              <span>
+                YAML frontmatter
+                <small>title, model, dates, message count</small>
+              </span>
+            </label>
+            <label class="row">
+              <input type="checkbox" id="opt-timestamps" />
+              <span>
+                Per-message timestamps
+                <small>adds the time under each turn</small>
+              </span>
+            </label>
+            <label class="row">
+              <input type="checkbox" id="opt-includeThoughts" />
+              <span>
+                Reasoning / thinking
+                <small>usually noise, sometimes gold</small>
+              </span>
+            </label>
+            <label class="row">
+              <input type="checkbox" id="opt-includeTools" />
+              <span>
+                Tool calls
+                <small>python, web search, canvas</small>
+              </span>
+            </label>
+            <label class="row">
+              <input type="checkbox" id="opt-includeSystem" />
+              <span>
+                System &amp; hidden messages
+                <small>custom instructions, memory</small>
+              </span>
+            </label>
+            <label class="row row-select">
+              <span>Turn headings</span>
+              <select id="opt-headingStyle">
+                <option value="h2">## You</option>
+                <option value="bold">**You**</option>
+              </select>
+            </label>
+          </div>
+        </details>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <span>Everything runs on this machine. Nothing is uploaded.</span>
+    </footer>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
