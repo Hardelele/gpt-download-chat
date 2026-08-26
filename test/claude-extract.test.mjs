@@ -26,7 +26,15 @@ import {
   ROOT_PARENT_UUID,
 } from '../extensions/claude/src/lib/api-client.js';
 
-import { normalizeConversation, normalizeMessage } from '../extensions/claude/src/lib/extract.js';
+import {
+  extractConversation,
+  normalizeConversation,
+  normalizeMessage,
+} from '../extensions/claude/src/lib/extract.js';
+
+// Agent A's fake DOM (shared test harness) — the real html2md converter runs
+// underneath it, so the fallback path is exercised, not mocked.
+import { makeDocument } from './fixtures/fake-dom.mjs';
 
 /* ------------------------------------------------------------------ */
 /* Fixture: a realistic /api/organizations/<org>/chat_conversations/<id> */
@@ -669,4 +677,85 @@ test('fetchConversation throws the last error when no org resolves it', async ()
     [`/organizations/${ORG}/chat_conversations/${CONV}`]: 401,
   });
   await assert.rejects(() => fetchConversation(CONV, { fetch: fetchFn }), /401/);
+});
+
+/* ------------------------------------------------------------------ */
+/* End to end: extractConversation through both paths                  */
+/* ------------------------------------------------------------------ */
+
+/** A trimmed stand-in for claude.ai's rendered transcript. */
+const CLAUDE_PAGE = `
+<main>
+  <div data-test-render-count="1">
+    <div data-testid="user-message"><p>Sort this file by the third column.</p></div>
+  </div>
+  <div data-test-render-count="2">
+    <div class="font-claude-response">
+      <div data-testid="thinking-block"><p>Still weighing the options here.</p></div>
+      <p>Here you go.</p>
+      <pre><code class="language-python">import csv
+</code></pre>
+    </div>
+  </div>
+</main>`;
+
+test('extractConversation returns the API result when the API works', async () => {
+  const fetchFn = fakeFetch({
+    '/api/organizations': [{ uuid: ORG, capabilities: ['chat'] }],
+    [`/organizations/${ORG}/chat_conversations/${CONV}`]: fixture(),
+  });
+  const convo = await extractConversation({
+    fetch: fetchFn,
+    location: { href: SOURCE_URL, origin: 'https://claude.ai' },
+  });
+  assert.equal(convo.extractedVia, 'api');
+  assert.equal(convo.title, 'Sorting a CSV in Python');
+  assert.equal(convo.messages.length, 9);
+});
+
+test('extractConversation degrades to the page and warns when the API 403s', async () => {
+  const fetchFn = fakeFetch({ '/api/organizations': 403, '/api/bootstrap': 403 });
+  const doc = makeDocument(CLAUDE_PAGE, { title: 'Sorting a CSV - Claude', href: SOURCE_URL });
+  const convo = await extractConversation({
+    fetch: fetchFn,
+    document: doc,
+    location: { href: SOURCE_URL, origin: 'https://claude.ai' },
+    scroll: false,
+  });
+
+  assert.equal(convo.extractedVia, 'dom');
+  assert.ok(convo.warnings.some((w) => /403|API/i.test(w)), JSON.stringify(convo.warnings));
+  assert.deepEqual(
+    convo.messages.map((m) => [m.role, m.contentType]),
+    [['user', 'text'], ['assistant', 'thoughts'], ['assistant', 'text']],
+  );
+  assert.equal(convo.messages[0].text, 'Sort this file by the third column.');
+  assert.match(convo.messages[2].text, /```python/);
+  assert.ok(!/weighing the options/.test(convo.messages[2].text), 'thinking leaked into the prose');
+});
+
+test('extractConversation throws only when both paths yield nothing', async () => {
+  const fetchFn = fakeFetch({ '/api/organizations': 403, '/api/bootstrap': 403 });
+  const doc = makeDocument('<main><p>nothing here</p></main>', { href: SOURCE_URL });
+  await assert.rejects(
+    () => extractConversation({
+      fetch: fetchFn,
+      document: doc,
+      location: { href: SOURCE_URL, origin: 'https://claude.ai' },
+      scroll: false,
+    }),
+    /Could not read this conversation/,
+  );
+});
+
+test('extractConversation goes straight to the page for a /share/ link', async () => {
+  const shareUrl = `https://claude.ai/share/${CONV}`;
+  const fetchFn = fakeFetch({});
+  const doc = makeDocument(CLAUDE_PAGE, { href: shareUrl });
+  const convo = await extractConversation({
+    fetch: fetchFn, document: doc, location: { href: shareUrl, origin: 'https://claude.ai' }, scroll: false,
+  });
+  assert.equal(convo.extractedVia, 'dom');
+  assert.equal(fetchFn.calls.length, 0, 'no API call should be made for a share link');
+  assert.ok(convo.warnings.some((w) => /Shared conversation link/.test(w)));
 });

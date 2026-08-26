@@ -132,6 +132,26 @@ function detachThoughts(el) {
 }
 
 /**
+ * Detach a node from its parent so a later conversion does not see it twice.
+ * Works on a real DOM and on the lightweight test document alike.
+ * @param {object} node
+ */
+function detach(node) {
+  try {
+    const parent = node.parentNode || node.parentElement;
+    if (!parent) return;
+    if (typeof parent.removeChild === 'function') {
+      parent.removeChild(node);
+      return;
+    }
+    if (Array.isArray(parent.childNodes)) {
+      const i = parent.childNodes.indexOf(node);
+      if (i !== -1) parent.childNodes.splice(i, 1);
+    }
+  } catch { /* duplication is survivable; a crash here is not */ }
+}
+
+/**
  * Convert one turn element into contract messages (a turn may yield a thoughts
  * message plus a prose message).
  *
@@ -148,12 +168,7 @@ export function turnToMessages(el) {
   let thoughtsText = '';
   if (thoughtsEl) {
     thoughtsText = String(htmlToMarkdown(thoughtsEl) || '').trim();
-    // Remove it from the tree so the prose conversion does not repeat it.
-    try {
-      if (thoughtsEl.parentNode && typeof thoughtsEl.parentNode.removeChild === 'function') {
-        thoughtsEl.parentNode.removeChild(thoughtsEl);
-      }
-    } catch { /* jsdom-less environments: fall through, duplication is survivable */ }
+    detach(thoughtsEl);
   }
 
   const text = String(htmlToMarkdown(el) || '').trim();
