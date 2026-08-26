@@ -1,0 +1,161 @@
+# Chrome Web Store submission checklist — Chat2MD
+
+Ordered. Everything above the line marked **HUMAN ONLY** is already done in this repo;
+everything below needs a person with a browser, a Google account and a credit card.
+
+---
+
+## 0. Already done in this repo
+
+- [x] `manifest.json` is MV3, version `0.1.0`, description 127/132 chars.
+- [x] Icons at 16/32/48/128 px — real PNGs, verified to decode (`npm run icons`).
+- [x] Store icon at 512×512 — `store/assets/icon512.png`.
+- [x] Three screenshots at exactly 1280×800 — `store/assets/screenshot-*.png`
+      (`npm run screenshots`; sources in `store/assets/src/` if you want to re-render).
+- [x] Listing copy — `store/listing.md`.
+- [x] Permission justifications, single purpose, data-usage answers — `store/permissions-justification.md`.
+- [x] Privacy policy written (`PRIVACY.md`) and a hosted copy staged at `docs/privacy.html`.
+- [x] Packaged archive — `npm run build` → `dist/chat2md-0.1.0.zip`, manifest at the root,
+      archive read back and validated.
+
+---
+
+## HUMAN ONLY — from here down, someone has to do this by hand
+
+### 1. Turn on GitHub Pages (needed before you can submit — the store requires a *reachable* policy URL)
+
+1. Push `main` to `github.com/hardelele/gpt-download-chat`.
+2. Repo → **Settings** → **Pages**.
+3. **Source:** *Deploy from a branch*. **Branch:** `main`, **Folder:** `/docs`. Save.
+4. Wait for the green tick (first publish takes 1–3 minutes), then open:
+
+   ```
+   https://hardelele.github.io/gpt-download-chat/privacy.html
+   ```
+
+   **Confirm in a private window that it loads.** A 404 here is the single most common
+   avoidable rejection — the reviewer opens the URL you typed, and if it does not resolve
+   the item is rejected without any further review.
+
+   The landing page at `https://hardelele.github.io/gpt-download-chat/` also works and is a
+   fine value for the Homepage field, though the GitHub repo URL is more useful.
+
+> `docs/.nojekyll` is committed so GitHub Pages serves the files as-is rather than running
+> them through Jekyll. Do not delete it.
+
+### 2. Register a developer account (one-time)
+
+1. Go to <https://chrome.google.com/webstore/devconsole>.
+2. Sign in with the Google account that will *own* the item. Choose carefully — transferring
+   an item to a different account later is a support ticket, not a setting.
+3. Pay the **one-time US$5 registration fee**. It is per account, not per extension, and it
+   is non-refundable. Payment can take a few minutes to clear before the console unlocks.
+4. Complete the **account tab**: publisher display name, a contact email, and a physical
+   address if you are asked for one.
+5. **Verify the contact email.** Unverified contact email blocks publishing, and the console
+   does not always say so loudly.
+
+### 3. Create the item and upload
+
+1. Console → **Items** → **Add new item**.
+2. Upload `dist/chat2md-0.1.0.zip`.
+   - If you get *"Manifest file is missing or unreadable"*, the archive has the manifest one
+     folder down. `npm run build` prevents this and fails loudly if it ever happens, so
+     rebuild rather than repacking by hand — and specifically **do not** zip the `extension`
+     folder from Explorer's right-click menu, which produces exactly that broken layout.
+
+### 4. Fill in the Store listing tab
+
+Copy from `store/listing.md`:
+
+- [ ] **Item name** — `Chat2MD — Save ChatGPT chats as Markdown` (pulled from the manifest).
+- [ ] **Short description** — pulled from the manifest; do not edit it here, edit the manifest.
+- [ ] **Detailed description** — paste the block from `store/listing.md`. Plain text only;
+      the field does not render Markdown or HTML.
+- [ ] **Category** — Productivity.
+- [ ] **Language** — English (United States).
+- [ ] **Store icon** — upload `store/assets/icon512.png` (the console accepts 128×128 but
+      takes the larger file and downscales it more cleanly).
+- [ ] **Screenshots** — upload all three from `store/assets/`. At least one is mandatory,
+      five is the maximum. Requirements: **1280×800 or 640×400**, PNG or JPEG, no alpha
+      channel, no rounded corners or drop shadows added by you around the outside of the
+      image. Ours are 1280×800 PNG.
+- [ ] **Small promo tile** — 440×280 PNG/JPEG. *Optional.* Only needed to be eligible for
+      store curation/featuring. Not generated; skip unless you want it.
+- [ ] **Marquee promo tile** — 1400×560 PNG/JPEG. *Optional*, homepage carousel only. Skip.
+- [ ] **Homepage URL** — `https://github.com/hardelele/gpt-download-chat`
+- [ ] **Support URL** — `https://github.com/hardelele/gpt-download-chat/issues`
+
+### 5. Fill in the Privacy tab
+
+Copy from `store/permissions-justification.md`:
+
+- [ ] **Single purpose description** — the paragraph in that file.
+- [ ] **Justification for `downloads`**.
+- [ ] **Justification for `activeTab`**.
+- [ ] **Justification for `scripting`**.
+- [ ] **Justification for `storage`**.
+- [ ] **Justification for host permissions** (`chatgpt.com`, `chat.openai.com`).
+- [ ] **Remote code** → *No, I am not using remote code.*
+- [ ] **Data usage** → leave every category **unchecked**. Nothing is collected.
+- [ ] Tick all **three certification checkboxes**.
+- [ ] **Privacy policy URL** → `https://hardelele.github.io/gpt-download-chat/privacy.html`
+
+### 6. Distribution tab
+
+- [ ] Visibility: **Public**.
+- [ ] Regions: **All**.
+- [ ] Pricing: **Free**. No ads, no in-app purchases.
+
+### 7. Submit
+
+- [ ] **Save draft**, then re-read the Privacy tab once more — it is where rejections come from.
+- [ ] **Submit for review.**
+- [ ] Leave *"Publish immediately after review"* on unless you want to coordinate a launch.
+
+---
+
+## What actually delays review
+
+Typical turnaround is **a few hours to three days**. These are what push it to one to three
+*weeks*, roughly in order of how often they bite:
+
+1. **A privacy policy URL that 404s, redirects, or sits behind a login.** Check it in a
+   private window before submitting. See step 1.
+2. **Permission justifications that do not match the manifest.** If B ever adds a permission,
+   `store/permissions-justification.md` must change in the same commit. A justification for a
+   permission you do not request is as bad as a missing one.
+3. **Anything that looks like remote code.** MV3 forbids it. `npm run verify` fails the build
+   on `eval(`, `new Function(`, a remote `<script src>`, or a URL to a host the manifest does
+   not declare — keep it passing.
+4. **Broad host permissions.** `<all_urls>` or `*://*/*` triggers a much slower manual
+   review. We request two explicit hosts; keep it that way.
+5. **Keyword stuffing or a misleading description.** Repeating "ChatGPT export markdown save
+   download" gets the listing rejected for spam. The copy in `store/listing.md` is
+   deliberately written as prose.
+6. **Trademark trouble in the name.** "Chat2MD — Save ChatGPT chats as Markdown" describes
+   compatibility rather than claiming affiliation, which is the safe form. Do **not** rename
+   it to anything that reads as first-party ("ChatGPT Exporter", "OpenAI Markdown"), and do
+   not use OpenAI's logo or wordmark in the icon or screenshots. Ours uses neither.
+7. **A first submission from a brand-new developer account** is reviewed more slowly than
+   subsequent ones. Expect the first one to be the slow one.
+8. **Screenshots that are not exactly 1280×800 or 640×400**, or that carry an alpha channel.
+   `npm run screenshots` asserts the dimensions and fails if they drift.
+
+## After it is published
+
+- [ ] Tag the release: `git tag v0.1.0 && git push --tags`.
+- [ ] Attach `dist/chat2md-0.1.0.zip` to the GitHub release (CI also uploads it as a
+      build artifact on every run).
+- [ ] Put the store URL in `README.md` and replace the "install from source" framing.
+- [ ] For every later version: bump **both** `package.json` and `extension/manifest.json` —
+      `npm run build` refuses to package if the two disagree — add a `CHANGELOG.md` entry,
+      then upload the new zip as a new package in the same item.
+
+## Sibling store items
+
+`CONTRACT-PLATFORMS.md` defines three more items (Claude, Gemini, AI Mode) sharing this
+codebase. Each is a **separate** store listing with its own screenshots and its own
+permission justifications, but the same developer account, the same $5 fee (paid once), and
+the **same privacy policy URL** — the policy is written to cover all of them. Build each with
+`node scripts/build.mjs --dir extensions/<platform>`.
