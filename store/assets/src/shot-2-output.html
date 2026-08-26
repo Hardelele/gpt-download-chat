@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Chat2MD — formatting survives</title>
+<style>
+  /* --- the real popup stylesheet, scoped to .popup --- */
+  /* Scope the real stylesheet to .popup: every top-level body / html,body / :root
+     selector becomes .popup, so the panel keeps its true dimensions, background
+     and typography instead of inheriting the stage's. */
+  /* Chat2MD popup — no framework, no remote assets, system font stack only. */
+
+.popup {
+  color-scheme: light dark;
+
+  --bg: #ffffff;
+  --bg-sunken: #f5f5f4;
+  --fg: #1c1b19;
+  --fg-muted: #6f6b66;
+  --line: #e4e2df;
+  --accent: #10a37f;
+  --accent-fg: #ffffff;
+  --accent-hover: #0d8e6d;
+  --warn-bg: #fff8e6;
+  --warn-line: #f0d79a;
+  --warn-fg: #7a5a11;
+  --err: #c0392b;
+  --radius: 8px;
+}
+
+
+
+* {
+  box-sizing: border-box;
+}
+
+/* Panes set their own `display`, which would otherwise out-specify the UA
+   `[hidden] { display: none }` rule and leave two panes on screen at once. */
+[hidden] {
+  display: none !important;
+}
+
+.popup {
+  margin: 0;
+}
+
+.popup {
+  width: 320px;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu,
+    "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- chrome ---------- */
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.mark {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.head h1 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.foot {
+  padding: 9px 14px;
+  border-top: 1px solid var(--line);
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+/* ---------- panes ---------- */
+
+.pane {
+  padding: 14px;
+}
+
+#pane-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 88px;
+}
+
+.lead {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+
+.muted {
+  margin: 0;
+  color: var(--fg-muted);
+}
+
+.muted b {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.err {
+  color: var(--err);
+  overflow-wrap: anywhere;
+}
+
+#pane-error .btn {
+  margin-top: 12px;
+}
+
+.spinner {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2s;
+  }
+}
+
+/* ---------- ready ---------- */
+
+.chat-title {
+  margin: 0 0 3px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  margin: 0 0 12px;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.notice {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--warn-line);
+  border-radius: var(--radius);
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  font-size: 11.5px;
+}
+
+.notice ul {
+  margin: 4px 0 0;
+  padding-left: 16px;
+}
+
+.notice li + li {
+  margin-top: 2px;
+}
+
+.actions {
+  display: grid;
+  gap: 6px;
+}
+
+.btn {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.btn-secondary {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--bg-sunken);
+}
+
+.status {
+  margin: 8px 0 0;
+  min-height: 1.45em;
+  color: var(--fg-muted);
+  font-size: 11.5px;
+}
+
+.status[data-tone="ok"] {
+  color: var(--accent);
+}
+
+.status[data-tone="err"] {
+  color: var(--err);
+}
+
+/* ---------- options ---------- */
+
+.options {
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.options summary {
+  cursor: pointer;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 500;
+  list-style: none;
+  user-select: none;
+}
+
+.options summary::-webkit-details-marker {
+  display: none;
+}
+
+.options summary::before {
+  content: "▸";
+  display: inline-block;
+  width: 12px;
+  transition: transform 0.12s ease;
+}
+
+.options[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.options summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.option-grid {
+  display: grid;
+  gap: 9px;
+  margin-top: 10px;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.row input[type="checkbox"] {
+  margin: 1px 0 0;
+  accent-color: var(--accent);
+  flex: none;
+}
+
+.row small {
+  display: block;
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.row-select {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.row-select select {
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-sunken);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+  .popup { width: 320px; border-radius: 12px; overflow: hidden; box-shadow: 0 24px 60px rgba(0,0,0,.45), 0 2px 8px rgba(0,0,0,.3); }
+  /* Compensates for the popup.css [hidden] bug reported in docs/HANDOFF.md. Once B lands
+     the one-line fix this override becomes a no-op; it is here so the screenshots are
+     correct today rather than blocked on someone else's commit. */
+  .popup [hidden] { display: none !important; }
+
+  /* --- the stage --- */
+  html, body { margin:0; padding:0; }
+  body {
+    width:1280px; height:800px; overflow:hidden;
+    background:
+      radial-gradient(1100px 620px at 78% 12%, rgba(247,183,51,.10), transparent 62%),
+      linear-gradient(160deg, #1c2633 0%, #0d1218 62%);
+    color:#f8fafc;
+    font:16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing:antialiased;
+    display:grid; grid-template-rows:auto 1fr; gap:0;
+  }
+  .cap { padding:56px 72px 0; }
+  .brand { display:flex; align-items:center; gap:12px; margin-bottom:26px; }
+  .brand img { width:34px; height:34px; border-radius:8px; }
+  .brand span { font-size:14px; letter-spacing:.16em; text-transform:uppercase; color:#f7b733; font-weight:600; }
+  h1 { margin:0; font-size:40px; line-height:1.12; letter-spacing:-.028em; max-width:20ch; font-weight:650; }
+  h1 em { font-style:normal; color:#f7b733; }
+  .sub { margin:14px 0 0; font-size:17px; color:#9aa7b5; max-width:46ch; }
+  .stage { padding:30px 72px 44px; display:flex; align-items:flex-start; gap:44px; min-height:0; }
+
+  .editor { flex:1 1 auto; min-width:0; background:#0b1016; border:1px solid #263140; border-radius:12px;
+            box-shadow:0 24px 60px rgba(0,0,0,.45); overflow:hidden; max-height:400px; display:flex; flex-direction:column; }
+  .tabbar { display:flex; align-items:center; gap:7px; padding:11px 15px; background:#121a23; border-bottom:1px solid #263140; }
+  .dot { width:10px; height:10px; border-radius:50%; }
+  .dot.r{background:#ec6a5e}.dot.y{background:#f4bf4f}.dot.g{background:#61c554}
+  .tab { margin-left:12px; font-size:12.5px; color:#8fa0b3; font-family:ui-monospace,"Cascadia Mono",Consolas,monospace; }
+  .code { margin:0; padding:18px 22px; font:12px/1.6 ui-monospace,"Cascadia Mono",Consolas,"Liberation Mono",monospace;
+          color:#c9d5e1; white-space:pre; overflow:hidden; flex:1 1 auto; }
+  .code .fm{color:#5f7183}.code .k{color:#f7b733}.code .key{color:#9db3c8}
+  .code .h{color:#7cc4ff;font-weight:600}.code .fence{color:#5f7183}
+  .code .tbl{color:#8bd5b0}.code .li{color:#dbe5ee}
+</style></head>
+<body>
+  <div class="cap">
+    <div class="brand"><img src="icon128.png" alt=""><span>Chat2MD</span></div>
+    <h1>Code fences, tables and lists <em>survive</em>.</h1>
+    <p class="sub">Fenced blocks keep their language tag. Tables stay tables. Nested lists keep their indentation, and LaTeX comes through unchanged.</p>
+  </div>
+  <div class="stage">
+<div class="editor">
+  <div class="tabbar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+    <span class="tab">2025-08-26-debugging-a-flaky-postgres-index.md</span></div>
+  <pre class="code">
+<span class="tbl">| Symptom | Likely cause |</span>
+<span class="tbl">| --- | --- |</span>
+<span class="tbl">| Index never chosen | Predicate not provable at plan time |</span>
+<span class="tbl">| Chosen, still slow | Missing `created_at` for the sort |</span>
+
+Two things to check:
+
+<span class="li">1. The index predicate must be a literal match. If you declared it as</span>
+   `WHERE status = 'pending'::order_status` but pass a `text` parameter, the
+   implication test fails silently.
+<span class="li">2. Your `ORDER BY created_at DESC LIMIT 50` needs the sort column *in the index*,</span>
+   otherwise Postgres still has to sort the whole matched set:
+
+<span class="fence">```sql</span>
+CREATE INDEX CONCURRENTLY orders_pending_recent
+  ON orders (tenant_id, created_at DESC)
+  WHERE status = 'pending';
+<span class="fence">```</span>
+
+The cost model is roughly $O(n \log n)$ for the sort you are paying for now, versus
+$O(\log n)$ for an index scan that is already ordered.
+</pre>
+</div></div>
+</body></html>
