@@ -564,3 +564,30 @@ test('renders whatever normalizeConversation() produces', async () => {
   assert.match(out, /^## ChatGPT\n\n`4`\.$/m);
   assert.equal(buildFilename(normalized), '2026-03-26-real-chat.md');
 });
+
+test('includeTools / includeThoughts override the hidden flag (real ChatGPT shape)', () => {
+  // ChatGPT marks tool output and reasoning as visually hidden; gating those on
+  // includeSystem too would make their own toggles no-ops.
+  const c = conv({
+    messages: [
+      msg({ role: 'tool', authorName: 'python', text: 'TOOL TEXT', hidden: true }),
+      msg({ role: 'assistant', contentType: 'thoughts', text: 'THOUGHT TEXT', hidden: true }),
+      msg({ role: 'user', text: 'PLUMBING', hidden: true }),
+    ],
+  });
+
+  const tools = toMarkdown(c, { now: NOW, includeTools: true });
+  assert.equal(tools.includes('TOOL TEXT'), true);
+  assert.equal(tools.includes('THOUGHT TEXT'), false);
+  assert.equal(tools.includes('PLUMBING'), false);
+
+  const thoughts = toMarkdown(c, { now: NOW, includeThoughts: true });
+  assert.equal(thoughts.includes('THOUGHT TEXT'), true);
+  assert.equal(thoughts.includes('TOOL TEXT'), false);
+
+  const sys = toMarkdown(c, { now: NOW, includeSystem: true });
+  assert.equal(sys.includes('PLUMBING'), true);
+  assert.equal(sys.includes('TOOL TEXT'), false);
+
+  assert.match(toMarkdown(c, { now: NOW }), /^messages: 0$/m);
+});

@@ -114,16 +114,26 @@ function resolveOptions(opts) {
  * message selection
  * ------------------------------------------------------------------ */
 
+/**
+ * Each category is gated by exactly one option, and that option also overrides
+ * `hidden`. That matters in practice: ChatGPT flags most tool output and all
+ * reasoning as `is_visually_hidden_from_conversation`, so gating those on
+ * `includeSystem` as well would make `includeTools` / `includeThoughts` do
+ * nothing at all. (Reported by Agent A, docs/HANDOFF.md.)
+ */
 function shouldRender(m, o) {
-  if (m.contentType === 'thoughts' && !o.includeThoughts) return false;
-  if (m.role === 'system' && !o.includeSystem) return false;
-  if (m.role === 'tool' && !o.includeTools) return false;
-  // `hidden` is plumbing: custom instructions, memory injections, tether markers.
+  if (m.contentType === 'thoughts') return o.includeThoughts && hasContent(m);
+  if (m.role === 'tool') return o.includeTools && hasContent(m);
+  if (m.role === 'system') return o.includeSystem && hasContent(m);
+  // Everything else that is plumbing — custom instructions, memory injections,
+  // tether markers — rides along with the system toggle.
   if (m.hidden === true && !o.includeSystem) return false;
+  return hasContent(m);
+}
 
-  const hasText = nonEmptyString(m.text) !== '';
-  const hasAttachments = Array.isArray(m.attachments) && m.attachments.length > 0;
-  return hasText || hasAttachments;
+function hasContent(m) {
+  if (nonEmptyString(m.text) !== '') return true;
+  return Array.isArray(m.attachments) && m.attachments.length > 0;
 }
 
 /* ------------------------------------------------------------------ *

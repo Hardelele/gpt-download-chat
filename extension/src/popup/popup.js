@@ -195,14 +195,17 @@ function metaLine(c) {
 function countRendered(c) {
   const o = currentOptions();
   const list = Array.isArray(c.messages) ? c.messages : [];
+  const has = (m) =>
+    (typeof m.text === 'string' && m.text.trim() !== '')
+    || (Array.isArray(m.attachments) && m.attachments.length > 0);
+
   return list.filter((m) => {
     if (!m || typeof m !== 'object') return false;
-    if (m.contentType === 'thoughts' && !o.includeThoughts) return false;
-    if (m.role === 'system' && !o.includeSystem) return false;
-    if (m.role === 'tool' && !o.includeTools) return false;
+    if (m.contentType === 'thoughts') return o.includeThoughts && has(m);
+    if (m.role === 'tool') return o.includeTools && has(m);
+    if (m.role === 'system') return o.includeSystem && has(m);
     if (m.hidden === true && !o.includeSystem) return false;
-    const hasText = typeof m.text === 'string' && m.text.trim() !== '';
-    return hasText || (Array.isArray(m.attachments) && m.attachments.length > 0);
+    return has(m);
   }).length;
 }
 
