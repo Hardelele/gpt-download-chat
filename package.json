@@ -18,7 +18,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test test/",
+    "test": "node --test",
     "icons": "node scripts/make-icons.mjs",
     "verify": "node scripts/verify.mjs",
     "build": "node scripts/build.mjs",

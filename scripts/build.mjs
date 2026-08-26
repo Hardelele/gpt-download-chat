@@ -185,7 +185,9 @@ for (const entry of entries) {
   central.writeUInt16LE(0, 32); // comment
   central.writeUInt16LE(0, 34); // disk number
   central.writeUInt16LE(0, 36); // internal attrs
-  central.writeUInt32LE(0o100644 << 16, 38); // external attrs: regular file 0644
+  // external attrs: unix mode 0100644 in the high 16 bits.
+  // (<<16 overflows into a negative int32 in JS, hence the unsigned shift.)
+  central.writeUInt32LE((0o100644 << 16) >>> 0, 38);
   central.writeUInt32LE(offset, 42);
   centrals.push(central, nameBuf);
 
