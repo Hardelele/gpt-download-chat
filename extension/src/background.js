@@ -17,7 +17,7 @@ import { buildFilename } from './lib/filename.js';
 
 const MIME = 'text/markdown;charset=utf-8';
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+export function handleMessage(message, _sender, sendResponse) {
   if (!message || message.type !== 'chat2md:download') return undefined;
 
   (async () => {
@@ -38,7 +38,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   })();
 
   return true; // async reply
-});
+}
+
+// Guarded so the module can also be imported by `node --test`.
+if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
+  chrome.runtime.onMessage.addListener(handleMessage);
+}
 
 /**
  * UTF-8 safe `data:` URL. Encoded in chunks so a very long conversation cannot

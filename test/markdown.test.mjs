@@ -476,3 +476,91 @@ test('slugify: collapses whitespace and repeated separators', () => {
   assert.equal(slugify(null), '');
   assert.equal(slugify(42), '');
 });
+
+/* ------------------------------------------------------------------ *
+ * service worker: UTF-8 safe data: URL
+ * ------------------------------------------------------------------ */
+
+test('toDataUrl round-trips Cyrillic, CJK and emoji', async () => {
+  const { toDataUrl } = await import('../extension/src/background.js');
+  const text = '# Привет\n\n中文 — emoji 🎉 — ok\n';
+  const url = toDataUrl(text);
+  assert.match(url, /^data:text\/markdown;charset=utf-8;base64,/);
+  const b64 = url.slice(url.indexOf(',') + 1);
+  assert.equal(Buffer.from(b64, 'base64').toString('utf8'), text);
+});
+
+test('toDataUrl handles a payload larger than one encoding chunk', async () => {
+  const { toDataUrl } = await import('../extension/src/background.js');
+  const text = 'ё'.repeat(100000);
+  const b64 = toDataUrl(text).split(',')[1];
+  assert.equal(Buffer.from(b64, 'base64').toString('utf8'), text);
+});
+
+test('service worker download handler renders, names and downloads', async (t) => {
+  const { handleMessage } = await import('../extension/src/background.js');
+  let captured = null;
+  globalThis.chrome = {
+    downloads: {
+      download: async (opts) => {
+        captured = opts;
+        return 42;
+      },
+    },
+  };
+  t.after(() => {
+    delete globalThis.chrome;
+  });
+
+  const reply = await new Promise((resolve) => {
+    handleMessage(
+      {
+        type: 'chat2md:download',
+        conversation: conv({ title: 'Привет мир', messages: [msg({ text: 'да' })] }),
+        options: { frontmatter: false },
+      },
+      null,
+      resolve,
+    );
+  });
+
+  assert.equal(reply.ok, true);
+  assert.equal(reply.downloadId, 42);
+  assert.equal(captured.filename, '2026-03-26-привет-мир.md');
+  assert.equal(captured.conflictAction, 'uniquify');
+  const decoded = Buffer.from(captured.url.split(',')[1], 'base64').toString('utf8');
+  assert.equal(decoded, '# Привет мир\n\n## You\n\nда\n');
+});
+
+test('service worker ignores messages that are not its own', async () => {
+  const { handleMessage } = await import('../extension/src/background.js');
+  assert.equal(handleMessage({ type: 'chat2md:extract' }, null, () => {}), undefined);
+  assert.equal(handleMessage(null, null, () => {}), undefined);
+});
+
+/* ------------------------------------------------------------------ *
+ * integration with Agent A's normaliser
+ * ------------------------------------------------------------------ */
+
+test('renders whatever normalizeConversation() produces', async () => {
+  const { normalizeConversation } = await import('../extension/src/lib/extract.js');
+  const normalized = normalizeConversation({
+    id: 'abc',
+    title: 'Real chat',
+    createTime: 1774519451,
+    updateTime: 1774523451,
+    model: 'gpt-5',
+    sourceUrl: 'https://chatgpt.com/c/abc',
+    extractedVia: 'api',
+    messages: [
+      { id: 'a', role: 'user', contentType: 'text', text: 'What is 2+2?' },
+      { id: 'b', role: 'assistant', contentType: 'text', text: '`4`.' },
+    ],
+    warnings: [],
+  });
+  const out = toMarkdown(normalized, { now: NOW });
+  assert.match(out, /^title: "Real chat"$/m);
+  assert.match(out, /^## You\n\nWhat is 2\+2\?$/m);
+  assert.match(out, /^## ChatGPT\n\n`4`\.$/m);
+  assert.equal(buildFilename(normalized), '2026-03-26-real-chat.md');
+});
