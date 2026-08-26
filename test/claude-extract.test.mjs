@@ -23,6 +23,7 @@ import {
   buildBranch,
   nodeToMessages,
   mapConversationPayload,
+  extractedAttachmentText,
   fence,
   listOrganizationIds,
   readCookie,
@@ -977,4 +978,236 @@ test('fetchSnapshot unwraps a payload nested under `conversation`', async () => 
 test('parseSnapshotId reads the id out of a share URL', () => {
   assert.equal(parseSnapshotId(`https://claude.ai/share/${CONV}`), CONV);
   assert.equal(parseSnapshotId(`https://claude.ai/chat/${CONV}`), null);
+});
+
+/* ------------------------------------------------------------------ */
+/* Ground truth measured against the live claude.ai API                */
+/* ------------------------------------------------------------------ */
+
+test('a real account has a chat org AND an api-only org — never take orgs[0]', async () => {
+  // Exact capability sets observed on a live account.
+  const fetchFn = fakeFetch({
+    '/api/organizations': [
+      { uuid: 'api-org', capabilities: ['api', 'api_individual'] },
+      { uuid: 'chat-org', capabilities: ['chat', 'claude_max'] },
+    ],
+  });
+  const ids = await listOrganizationIds({ fetch: fetchFn });
+  assert.equal(ids[0], 'chat-org', 'the chat-capable org must be tried first');
+  assert.ok(ids.includes('api-org'), 'the api-only org stays as a last resort');
+});
+
+test('fetchConversation still resolves when the chat org is listed second', async () => {
+  const fetchFn = fakeFetch({
+    '/api/organizations': [
+      { uuid: 'api-org', capabilities: ['api', 'api_individual'] },
+      { uuid: 'chat-org', capabilities: ['chat', 'claude_max'] },
+    ],
+    '/organizations/api-org/chat_conversations/': 404,
+    [`/organizations/chat-org/chat_conversations/${CONV}`]: fixture(),
+  });
+  const got = await fetchConversation(CONV, { fetch: fetchFn });
+  assert.equal(got.uuid, CONV);
+});
+
+test('the lastActiveOrg cookie is tried before any request is made', async () => {
+  const fetchFn = fakeFetch({
+    [`/organizations/${ORG}/chat_conversations/${CONV}`]: fixture(),
+  });
+  await fetchConversation(CONV, { fetch: fetchFn, cookie: `lastActiveOrg=${ORG}` });
+  assert.ok(
+    fetchFn.calls[0].includes(`/organizations/${ORG}/chat_conversations/`),
+    `expected the conversation to be the first request, got ${fetchFn.calls[0]}`,
+  );
+});
+
+test('a message flagged truncated raises a warning', () => {
+  const convo = mapConversationPayload({
+    uuid: 'c',
+    name: 'Truncated',
+    chat_messages: [
+      {
+        uuid: 'm1', parent_message_uuid: ROOT_PARENT_UUID, sender: 'assistant',
+        truncated: true, content: [{ type: 'text', text: 'half a sent' }],
+      },
+    ],
+  }, { sourceUrl: SOURCE_URL });
+  assert.ok(convo.warnings.some((w) => /truncated/i.test(w)), JSON.stringify(convo.warnings));
+});
+
+test('thinking flagged hidden or thinking_hidden is marked hidden', () => {
+  for (const flag of ['hidden', 'thinking_hidden']) {
+    const msgs = nodeToMessages({
+      uuid: 'x', sender: 'assistant',
+      content: [
+        { type: 'thinking', thinking: 'private reasoning', [flag]: true },
+        { type: 'text', text: 'visible answer' },
+      ],
+    });
+    assert.equal(msgs[0].contentType, 'thoughts');
+    assert.equal(msgs[0].hidden, true, `${flag} must set hidden`);
+    assert.equal(msgs[1].hidden, false);
+  }
+});
+
+test('thinking text is read from `thinking`, never from `text`', () => {
+  // A thinking block that carries BOTH must use `thinking`.
+  const parts = renderContent([
+    { type: 'thinking', thinking: 'the real reasoning', text: '' },
+  ]);
+  assert.equal(parts[0].text, 'the real reasoning');
+});
+
+test('thinking truncated is reported the same way as cut_off', () => {
+  const parts = renderContent([{ type: 'thinking', thinking: 'partial', truncated: true }]);
+  assert.match(parts[0].text, /cut off/);
+});
+
+test('an unrecognised block type is exported and counted, never dropped', () => {
+  const warnings = [];
+  const parts = renderContent([
+    { type: 'text', text: 'hello' },
+    { type: 'some_future_block', payload: { a: 1 } },
+    { type: 'another_new_one', input: { b: 2 } },
+  ], { warnings });
+
+  assert.equal(parts.length, 3, 'unknown blocks must still produce output');
+  assert.match(parts[2].text, /"b": 2/, 'a block with an input must fall back to its input');
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /2 content blocks of an unrecognised type/);
+  assert.match(warnings[0], /some_future_block/);
+  assert.match(warnings[0], /another_new_one/);
+});
+
+test('unknown blocks surface as a conversation warning end to end', () => {
+  const convo = mapConversationPayload({
+    uuid: 'c', name: 'Future',
+    chat_messages: [{
+      uuid: 'm1', parent_message_uuid: ROOT_PARENT_UUID, sender: 'assistant',
+      content: [{ type: 'not_invented_yet', text: 'still readable' }],
+    }],
+  }, { sourceUrl: SOURCE_URL });
+  assert.ok(convo.warnings.some((w) => /unrecognised type/.test(w)));
+  assert.match(convo.messages[0].text, /still readable/);
+});
+
+test('attachments[] extracted_content is exported, not dropped', () => {
+  const msgs = nodeToMessages(fixture().chat_messages.find((m) => m.uuid === M1), {
+    origin: 'https://claude.ai',
+  });
+  // It merges into the user's own turn rather than becoming a separate message.
+  assert.equal(msgs.length, 1);
+  assert.match(msgs[0].text, /\*\*Attachment: sales\.csv\*\*/);
+  assert.match(msgs[0].text, /```csv\na,b,c\n1,2,3\n```/);
+});
+
+test('extractedAttachmentText infers a fence language from the file name', () => {
+  const out = extractedAttachmentText({
+    attachments: [{ file_name: 'main.py', extracted_content: 'print(1)' }],
+  });
+  assert.equal(out[0], '**Attachment: main.py**\n\n```python\nprint(1)\n```');
+});
+
+test('a files[] entry with no URL yields no dead link', () => {
+  // Exact shape observed live: no preview_url, no document_asset.
+  const atts = mapAttachments({
+    files: [{
+      success: true, path: '/mnt/user-data/uploads/notes.txt', file_kind: 'blob',
+      file_uuid: 'f1', file_name: 'notes.txt', size_bytes: 12, uuid: 'f1',
+    }],
+  }, 'https://claude.ai');
+  assert.equal(atts.length, 1);
+  assert.equal(atts[0].name, 'notes.txt');
+  assert.equal(atts[0].type, 'file');
+  assert.equal(atts[0].url, null, 'a missing URL must stay null, never a fabricated link');
+});
+
+test('an exactly-round message count warns about a possible silent limit', () => {
+  const chat_messages = [];
+  for (let i = 0; i < 20; i++) {
+    chat_messages.push({
+      uuid: `m${i}`,
+      parent_message_uuid: i === 0 ? ROOT_PARENT_UUID : `m${i - 1}`,
+      sender: i % 2 === 0 ? 'human' : 'assistant',
+      content: [{ type: 'text', text: `turn ${i}` }],
+    });
+  }
+  const convo = mapConversationPayload(
+    { uuid: 'c', name: 'Long', current_leaf_message_uuid: 'm19', chat_messages },
+    { sourceUrl: SOURCE_URL },
+  );
+  assert.equal(convo.messages.length, 20);
+  assert.ok(convo.warnings.some((w) => /round number/.test(w)), JSON.stringify(convo.warnings));
+});
+
+test('a warning is emitted once, not once per message', () => {
+  const chat_messages = [];
+  for (let i = 0; i < 4; i++) {
+    chat_messages.push({
+      uuid: `m${i}`,
+      parent_message_uuid: i === 0 ? ROOT_PARENT_UUID : `m${i - 1}`,
+      sender: 'assistant', truncated: true,
+      content: [{ type: 'text', text: 'x' }],
+    });
+  }
+  const convo = mapConversationPayload(
+    { uuid: 'c', name: 'T', current_leaf_message_uuid: 'm3', chat_messages },
+    { sourceUrl: SOURCE_URL },
+  );
+  assert.equal(convo.warnings.filter((w) => /truncated/i.test(w)).length, 1);
+});
+
+/* ------------------------------------------------------------------ */
+/* Markdown fidelity — the thing rivals get wrong                      */
+/* ------------------------------------------------------------------ */
+
+test('LaTeX, tables, footnotes and nested lists survive byte-exact on the API path', () => {
+  const source = [
+    'Inline math $E = mc^2$ and display math:',
+    '',
+    '$$\\int_0^\\infty e^{-x^2}\\,dx = \\frac{\\sqrt{\\pi}}{2}$$',
+    '',
+    '| Symbol | Meaning | Units |',
+    '| --- | ---: | :---: |',
+    '| $\\alpha$ | angle | rad |',
+    '| $\\beta$ | `rate` | s^-1 |',
+    '',
+    '1. first',
+    '   - nested *item*',
+    '     - deeper `code`',
+    '2. second[^1]',
+    '',
+    '> quoted **text** with a [link](https://example.com)',
+    '',
+    '[^1]: the footnote body',
+  ].join('\n');
+
+  const convo = mapConversationPayload({
+    uuid: 'c', name: 'Fidelity',
+    chat_messages: [{
+      uuid: 'm1', parent_message_uuid: ROOT_PARENT_UUID, sender: 'assistant',
+      content: [{ type: 'text', text: source }],
+    }],
+  }, { sourceUrl: SOURCE_URL });
+
+  assert.equal(convo.messages.length, 1);
+  assert.equal(convo.messages[0].text, source, 'the API path must not re-render text at all');
+});
+
+test('a code block inside an artifact keeps its exact bytes', () => {
+  const code = 'def f(x):\n    return x ** 2  # <tag> & "quote" \\n\n';
+  const convo = mapConversationPayload({
+    uuid: 'c', name: 'Code',
+    chat_messages: [{
+      uuid: 'm1', parent_message_uuid: ROOT_PARENT_UUID, sender: 'assistant',
+      content: [{
+        type: 'tool_use', id: 't', name: 'artifacts',
+        input: { id: 'a', command: 'create', language: 'python', title: 'f.py', content: code },
+      }],
+    }],
+  }, { sourceUrl: SOURCE_URL });
+
+  const body = convo.messages[0].text;
+  assert.ok(body.includes(code.replace(/\n$/, '')), 'artifact bytes must survive unescaped');
+  assert.ok(!body.includes('&lt;'), 'nothing may be HTML-escaped on the API path');
 });

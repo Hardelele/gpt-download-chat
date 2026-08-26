@@ -323,13 +323,15 @@ function safeJson(value) {
  * untouched — they must never be round-tripped through HTML.
  *
  * @param {object[]} blocks
- * @param {{artifacts?:Map, messageKey?:string}} [ctx]  folded-artifact context
- *        from `collectArtifacts`; without it each artifact block renders alone.
+ * @param {{artifacts?:Map, messageKey?:string, warnings?:string[]}} [ctx]
+ *        folded-artifact context from `collectArtifacts` (without it each
+ *        artifact block renders alone), plus a sink for unknown-block warnings.
  * @returns {Part[]}
  */
 export function renderContent(blocks, ctx = {}) {
   const parts = [];
   const artifactToolUseIds = new Set();
+  const unknown = [];
   const list = asArray(blocks);
 
   for (let i = 0; i < list.length; i++) {
@@ -356,14 +358,19 @@ export function renderContent(blocks, ctx = {}) {
         .map((s) => (typeof s === 'string' ? s : firstString(s && s.summary, s && s.text)))
         .filter(Boolean)
         .join('\n\n');
-      const text = firstString(block.thinking, block.text, summaries, block.summary) || '';
-      const cutOff = block.cut_off === true ? '\n\n_(thinking was cut off)_' : '';
+      // The reasoning lives in `thinking`. Reading `text` here yields nothing.
+      const text = firstString(block.thinking, summaries, block.summary, block.text) || '';
+      const cutOff = (block.cut_off === true || block.truncated === true)
+        ? '\n\n_(thinking was cut off)_'
+        : '';
+      // Claude itself marks some reasoning as not for display.
+      const suppressed = block.hidden === true || block.thinking_hidden === true;
       if (type === 'redacted_thinking' && !text.trim()) {
         parts.push({
-          kind: 'thoughts', text: '_(redacted thinking)_', authorName: null, hidden: false,
+          kind: 'thoughts', text: '_(redacted thinking)_', authorName: null, hidden: suppressed,
         });
       } else if (text.trim()) {
-        parts.push({ kind: 'thoughts', text: text + cutOff, authorName: null, hidden: false });
+        parts.push({ kind: 'thoughts', text: text + cutOff, authorName: null, hidden: suppressed });
       }
       continue;
     }
@@ -428,11 +435,25 @@ export function renderContent(blocks, ctx = {}) {
       continue;
     }
 
-    // Unknown block type: keep it rather than silently dropping content.
-    const fallback = firstString(block.text, block.content);
+    // Unknown block type. `tool_use`/`tool_result` did not appear at all in the
+    // sampled conversations, so the type list above is certainly incomplete.
+    // Never drop a block silently: render whatever it carries, and count it.
+    const fallback = firstString(block.text, block.thinking, block.content)
+      || (block.input === undefined ? null : safeJson(block.input))
+      || safeJson(block);
     if (fallback && fallback.trim()) {
       parts.push({ kind: 'text', text: fallback, authorName: null, hidden: false });
     }
+    unknown.push(type || '(untyped)');
+  }
+
+  if (unknown.length && Array.isArray(ctx.warnings)) {
+    const kinds = Array.from(new Set(unknown)).join(', ');
+    ctx.warnings.push(
+      `Claude sent ${unknown.length} content block${unknown.length === 1 ? '' : 's'} of an `
+      + `unrecognised type (${kinds}). They were exported as raw text rather than dropped, `
+      + 'but they may not be formatted correctly.',
+    );
   }
 
   return parts;
@@ -485,6 +506,26 @@ export function mapAttachments(apiMessage, origin) {
     seen.add(key);
     return true;
   });
+}
+
+/**
+ * Markdown for the extracted text of each uploaded document on a message.
+ * `attachments[]` carries no URL, so this content is not recoverable any other
+ * way once the chat is exported.
+ * @param {object} apiMessage
+ * @returns {string[]}
+ */
+export function extractedAttachmentText(apiMessage) {
+  const out = [];
+  for (const a of asArray(apiMessage && apiMessage.attachments)) {
+    if (!a || typeof a !== 'object') continue;
+    const body = typeof a.extracted_content === 'string' ? a.extracted_content : '';
+    if (!body.trim()) continue;
+    const name = firstString(a.file_name, a.fileName, a.name) || 'attachment';
+    const language = languageFromPath(name) || '';
+    out.push(`**Attachment: ${name}**\n\n${fence(body, language)}`);
+  }
+  return out;
 }
 
 /* ------------------------------------------------------------------ */
@@ -642,7 +683,7 @@ const SENDER_ROLE = { human: 'user', user: 'user', assistant: 'assistant', ai: '
  * `includeThoughts` / `includeTools` instead of them being welded into the prose.
  *
  * @param {object} node
- * @param {{origin?:string, artifacts?:Map, index?:number}} [opts]
+ * @param {{origin?:string, artifacts?:Map, index?:number, warnings?:string[]}} [opts]
  * @returns {import('./extract.js').Message[]}
  */
 export function nodeToMessages(node, opts = {}) {
@@ -654,10 +695,16 @@ export function nodeToMessages(node, opts = {}) {
   const baseId = messageId(node);
   const attachments = mapAttachments(node, opts.origin);
 
+  const warnings = Array.isArray(opts.warnings) ? opts.warnings : null;
   const parts = renderContent(node.content, {
     artifacts: opts.artifacts,
     messageKey: baseId || `#${opts.index == null ? 0 : opts.index}`,
+    warnings,
   });
+
+  if (node.truncated === true && warnings) {
+    warnings.push('Claude reported one message as truncated; its text may be incomplete.');
+  }
 
   // `text` and `content[]` coexist: under `rendering_mode=messages` `text` is
   // usually empty, but an agent turn can carry its final answer in `text` while
@@ -669,6 +716,13 @@ export function nodeToMessages(node, opts = {}) {
     if (!prose.includes(legacy)) {
       parts.push({ kind: 'text', text: legacy, authorName: null, hidden: false });
     }
+  }
+
+  // `attachments[].extracted_content` is the actual text of a pasted or
+  // uploaded document, and there is no URL to link to instead. Dropping it
+  // would export "here is my spec, review it" without the spec.
+  for (const extracted of extractedAttachmentText(node)) {
+    parts.push({ kind: 'text', text: extracted, authorName: null, hidden: false });
   }
 
   // Merge adjacent prose so a message split across several text blocks reads
@@ -714,8 +768,9 @@ export function nodeToMessages(node, opts = {}) {
       attachments: own,
       // NOTE: `hidden` is gated by `includeSystem` in the shared renderer, so
       // thoughts and tool traffic stay unhidden and are gated by their own
-      // options (`includeThoughts` / `includeTools`) instead.
-      hidden: role === 'system',
+      // options (`includeThoughts` / `includeTools`) instead. The exception is
+      // reasoning Claude itself flagged `hidden`/`thinking_hidden`.
+      hidden: part.hidden === true || role === 'system',
     });
   });
 
@@ -766,14 +821,30 @@ export function mapConversationPayload(payload, opts = {}) {
   // so only the finished version of each is rendered.
   const artifacts = collectArtifacts(branch);
 
+  // No pagination has been observed on this endpoint, but an array whose length
+  // is exactly a round number is the shape a silent limit would take.
+  const ROUND_LIMITS = [20, 25, 50, 100, 200, 500, 1000];
+  if (ROUND_LIMITS.includes(flatCount)) {
+    warnings.push(
+      `Claude returned exactly ${flatCount} messages. That is a suspiciously round number — `
+      + 'if this conversation is longer, the export may be missing the rest.',
+    );
+  }
+
   const messages = [];
   branch.forEach((node, index) => {
     try {
-      messages.push(...nodeToMessages(node, { origin: opts.origin, artifacts, index }));
+      messages.push(...nodeToMessages(node, { origin: opts.origin, artifacts, index, warnings }));
     } catch (err) {
       warnings.push(`Skipped one message that could not be read (${err && err.message ? err.message : err}).`);
     }
   });
+
+  // One warning per distinct problem, not one per message.
+  const deduped = [];
+  for (const w of warnings) if (!deduped.includes(w)) deduped.push(w);
+  warnings.length = 0;
+  warnings.push(...deduped);
 
   const model = firstString(p.model, p.settings && p.settings.model)
     || lastModel(branch)
@@ -847,7 +918,11 @@ export async function listOrganizationIds(opts = {}) {
     }
   };
 
-  // 1. /api/bootstrap. This is what claude.ai's own client uses; it names the
+  // 1. The `lastActiveOrg` cookie — free, no request, and it is the org the
+  //    user is actually looking at.
+  push(readCookie('lastActiveOrg', opts.cookie));
+
+  // 2. /api/bootstrap. This is what claude.ai's own client uses; it names the
   //    active membership directly, which /api/organizations does not.
   try {
     const boot = await getJson(`${origin}/api/bootstrap`, opts);
@@ -856,10 +931,10 @@ export async function listOrganizationIds(opts = {}) {
     }
   } catch { /* older or changed build: fall through */ }
 
-  // 2. The `lastActiveOrg` cookie, readable from the content script.
-  push(readCookie('lastActiveOrg', opts.cookie));
-
-  // 3. /api/organizations, chat-capable orgs before API-only (Console) orgs.
+  // 3. /api/organizations. Measured on a real account: this returns TWO orgs,
+  //    one with capabilities ["chat","claude_max"] holding the conversations
+  //    and one with ["api","api_individual"] holding none. Taking orgs[0] is a
+  //    coin flip, so scan capabilities and put chat-capable orgs first.
   try {
     const orgs = asArray(await getJson(`${origin}/api/organizations`, opts))
       .filter((o) => o && firstString(o.uuid, o.id));
@@ -868,7 +943,7 @@ export async function listOrganizationIds(opts = {}) {
       let s = 0;
       if (caps.includes('chat')) s += 100;
       if (caps.some((c) => c.startsWith('claude_'))) s += 10;
-      if (caps.includes('api') && !caps.includes('chat')) s -= 50;
+      if (caps.some((c) => c === 'api' || c.startsWith('api_')) && !caps.includes('chat')) s -= 50;
       if (o.active_flags || o.is_active) s += 5;
       return s;
     };
@@ -910,20 +985,19 @@ export function readCookie(name, jar) {
  */
 export async function fetchConversation(conversationId, opts = {}) {
   const origin = opts.origin || 'https://claude.ai';
-  const warnings = opts.warnings || [];
-  const orgIds = opts.organizationId
-    ? [opts.organizationId]
-    : await listOrganizationIds({ ...opts, origin });
-
-  if (!orgIds.length) throw new Error('no organization found for this session');
 
   // `tree=True` is what makes the response carry every branch; without it the
-  // server picks a linear path for us. `render_all_tools` keeps tool blocks
-  // from collapsing to "not supported on your current device".
+  // server picks a linear path for us. `render_all_tools` keeps tool and
+  // artifact blocks from being elided.
   const query = 'tree=True&rendering_mode=messages&render_all_tools=true'
     + '&skip_uuid_injection=true&consistency=strong';
+
+  const tried = new Set();
   let lastError = null;
-  for (const orgId of orgIds) {
+
+  const attempt = async (orgId) => {
+    if (!orgId || tried.has(orgId)) return null;
+    tried.add(orgId);
     const url = `${origin}/api/organizations/${orgId}/chat_conversations/${conversationId}?${query}`;
     try {
       const payload = await getJson(url, opts);
@@ -932,8 +1006,32 @@ export async function fetchConversation(conversationId, opts = {}) {
     } catch (err) {
       lastError = err;
     }
+    return null;
+  };
+
+  if (opts.organizationId) {
+    const direct = await attempt(opts.organizationId);
+    if (direct) return direct;
+    throw lastError || new Error('conversation could not be fetched');
   }
-  void warnings;
+
+  // The `lastActiveOrg` cookie costs nothing and is usually right — try it
+  // before spending a round trip on discovery.
+  const hinted = await attempt(readCookie('lastActiveOrg', opts.cookie));
+  if (hinted) return hinted;
+
+  let orgIds = [];
+  try {
+    orgIds = await listOrganizationIds({ ...opts, origin });
+  } catch (err) {
+    throw lastError || err;
+  }
+  if (!orgIds.length && !tried.size) throw new Error('no organization found for this session');
+
+  for (const orgId of orgIds) {
+    const payload = await attempt(orgId);
+    if (payload) return payload;
+  }
   throw lastError || new Error('conversation could not be fetched');
 }
 
