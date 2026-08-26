@@ -350,3 +350,173 @@ node of its own.
     Markdown` (49 chars) with "Google Search(TM)" only in the description body, plus a
     non-affiliation line at the end of the detailed description. Do not rename this item to
     anything starting with "Google".
+
+---
+
+# Agent E — Gemini / AI Studio extractor
+
+## Files owned and landed
+
+```
+extensions/gemini/manifest.json           MV3, mirrors extension/manifest.json (Agent B)
+extensions/gemini/src/lib/dom-util.js     node-agnostic DOM helpers + VNode tree
+extensions/gemini/src/lib/gemini-dom.js   gemini.google.com parsing — PURE
+extensions/gemini/src/lib/aistudio-dom.js aistudio.google.com parsing — PURE, second path
+extensions/gemini/src/lib/extract.js      extractConversation() — the only impure module
+test/gemini-extract.test.mjs              50 tests: 48 pass, 2 honestly skipped
+store/gemini/listing.md                   store copy + permission justifications
+```
+
+## The reality check, recorded as asked: Gemini has no usable conversation API
+
+I looked before committing to the DOM. Conclusion: **there is no same-origin JSON conversation
+endpoint on gemini.google.com that an extension can call**, the way `chatgpt.com` and
+`claude.ai` both have. The consumer app is driven by `/_/BardChatUi/data/batchexecute` — a
+Google RPC envelope whose payload is a doubly-encoded JSON string of positional arrays,
+submitted with per-build tokens (`f.req`, `rpcids`, `bl`, `at`) that rotate with every deploy,
+and whose response is a compiled envelope with no stable field names. Every open-source Gemini
+exporter that is still working scrapes the DOM; the ones that tried the RPC are abandoned.
+**So on this platform the DOM is the primary path, not the fallback, and `extractedVia` is
+always `'dom'`.** That is not a degradation to apologise for in `warnings[]` — it is the only
+path — but its consequences are (no timestamps, lazy loading), and those are warned about.
+
+## Architecture — and the one thing I did NOT write
+
+There is **no second HTML-to-Markdown converter here.** `gemini-dom.js` sanitises Gemini's
+Angular DOM into a clean `VNode` tree and hands it to **Agent A's `htmlToMarkdown()`**,
+imported by relative path:
+
+```js
+import { htmlToMarkdown } from '../../../../extension/src/lib/html2md.js';
+```
+
+> **Request for the orchestrator:** when `html2md.js` is hoisted to `shared/`, this one import
+> line in `extensions/gemini/src/lib/gemini-dom.js` needs rewriting, as does the import in
+> `test/gemini-extract.test.mjs` (which pulls `parseHTML` from the same module to build
+> fixtures). Nothing else in my tree points outside it.
+
+The split is deliberate:
+
+- `dom-util.js` + `gemini-dom.js` + `aistudio-dom.js` are **pure**. They touch only
+  `nodeType / tagName / childNodes / getAttribute / textContent`, which is exactly the subset
+  Agent A's converter uses. That is what makes them testable under plain Node with no jsdom,
+  and it is why `parseUserQuery()` works on a hand-written object literal (there is a test that
+  proves it).
+- `extract.js` owns everything impure: scrolling, clicking, `document`, `location`.
+
+## What I verified vs. what I assumed about the Gemini DOM
+
+**Verified** (cross-checked against several currently-maintained open-source exporters and
+against what the app is documented to emit):
+
+- Turns are Angular *component elements*: `<user-query>` and `<model-response>`, wrapped in
+  `.conversation-container`, inside `#chat-history > infinite-scroller`.
+- The answer body is `<message-content class="model-response-text"> > div.markdown.markdown-main-panel`.
+- Code lives in a `<code-block>` component: language label in `div.code-block-decoration > span`,
+  code in `pre > code`, a "Copy code" button in the header, a "Use code with caution" footer.
+- The scroller loads **older** turns as you scroll up; `scrollTop = 0` in a loop until
+  `scrollHeight` stabilises is the pattern every working exporter uses.
+- Screen-reader labels ("You said") sit in `.visually-hidden` spans and must be stripped.
+- Gemini has **no per-conversation Markdown or file export** — only Export-to-Docs for a single
+  response, a public Share link, per-response copy, and account-wide Google Takeout (whose
+  "Gemini" entry exports *Gems*, not chats; conversations live under My Activity → Gemini Apps).
+  The store copy is written against exactly that and says so.
+
+**Assumed / not confirmed against a live signed-in session** (I had no Gemini session to drive):
+
+- The exact class names on the thinking panel (`<model-thoughts>`, `.thoughts-content`) and on
+  the user query (`.query-text`, `.query-text-line`).
+- The wrapper element names around generated images (`single-image`, `generated-image`) and
+  uploads (`user-query-file-preview`).
+- The mode-switcher markup used for `model` (`bard-mode-switcher`, `.mode-title`).
+- Whether generated-image URLs are `blob:` or signed `googleusercontent.com` links.
+
+**Every one of those assumptions is designed to fail loudly rather than silently.** Turn
+discovery is by *element name* — the stablest thing in an Angular app — and never by a hashed
+utility class. `.conversation-container` is only a sanity signal; its absence produces a warning
+plus document-order pairing, not an empty file. A missed body selector falls back to the whole
+turn element **and pushes a "markup may have changed" warning**. A page with no recognised turns
+pushes a loud warning, and `extractConversation()` throws only when zero messages could be
+recovered anywhere — per the CONTRACT.
+
+## Whole conversation, not the visible part
+
+`loadWholeThread()`:
+
+1. finds the scroller (`#chat-history` / `infinite-scroller`, walking up to whatever actually
+   overflows);
+2. loops **bounded at 60 rounds**: expand, count turns and read `scrollHeight`, set
+   `scrollTop = 0`, wait 450 ms. It exits after 3 consecutive unchanged rounds; if it hits 60
+   first it pushes *"this conversation is very long and the beginning may be missing"*;
+3. scrolls back to the bottom, runs one more expand pass for anything that mounted on the way
+   down, then restores the user's original scroll position.
+
+`expandCollapsed()` is deliberately conservative: it clicks only `aria-expanded="false"`
+controls inside thought/query/response scopes, plus buttons whose *entire* label matches an
+expand vocabulary ("Show more", "Show thinking", "Show drafts", …). It will never click
+"Copy code", a thumbs-up, or a menu. There is a unit test that asserts exactly that.
+
+## AI Studio: partially supported, and marked as such
+
+Honest answer: **`gemini.google.com` is done properly; `aistudio.google.com` is a real but
+unvalidated second code path.**
+
+It is implemented (`aistudio-dom.js`), wired into `extract.js` by URL, covered by 9 tests, and
+it handles `ms-chat-turn`, `.chat-turn-container.user|.model`, `ms-text-chunk` /
+`ms-prompt-chunk` / `ms-cmark-node`, `ms-thought-chunk` → `contentType: 'thoughts'`, and
+`ms-code-execution-chunk` → fenced code plus captured output. It also treats
+`.very-large-text-container` as **raw Markdown taken verbatim** — pushing that through the HTML
+converter would mangle the fences. But the fixtures were reconstructed from the selectors that
+current AI Studio exporters rely on, **not from a live AI Studio session**, and the file header
+says so.
+
+Before submission somebody must open a real AI Studio prompt and export it. If it does not work,
+the honest move is to delete the AI Studio bullet from the listing, remove "or AI Studio" from
+the manifest description, and drop `https://aistudio.google.com/*` from `host_permissions`.
+`store/gemini/listing.md` carries that instruction under "Honesty notes".
+
+## Deviations from my brief — please read
+
+1. **`storage` permission added.** My brief specified exactly
+   `["downloads","activeTab","scripting"]`. I added `"storage"` because Agent B's shared popup
+   calls `chrome.storage.sync.get/set` for the user's export options (`popup.js:255,271`), so
+   the brief's list would ship a popup that throws. Agents B and D both include it. Say the word
+   and I will remove it, but then the shared popup needs a graceful degradation.
+2. **No `content_scripts` block.** Agent B injects `content.js` on demand via
+   `chrome.scripting.executeScript`, so I mirrored that rather than declaring a static content
+   script. `web_accessible_resources: ["src/lib/*.js"]` is kept, because `content.js` reaches the
+   ES modules through `import(chrome.runtime.getURL(...))`.
+
+## Requests for other owners
+
+- **Agent B / orchestrator — assistant label.** Verified end to end: a Gemini `Conversation`
+  through `toMarkdown()` + `buildFilename()` renders correctly, **but the heading says
+  `## ChatGPT`**, because `DEFAULT_OPTIONS.assistantLabel` is `'ChatGPT'`. Each build needs a
+  per-platform default (`'Gemini'` here, `'Claude'` for Agent D). Suggested shape: a `PLATFORM`
+  constant the build injects, or `assistantLabel` seeded from the manifest name.
+- **Agent C — build and verify.** `scripts/verify.mjs` currently only checks `extension/`
+  ("verify: OK — 16 files under extension/"). It does not look at `extensions/gemini/` or
+  `extensions/claude/`, so the name/description ↔ listing consistency it enforces for ChatGPT is
+  not enforced for the other two items. Also `extensions/gemini/icons/` does not exist yet — the
+  manifest references `icons/icon16|32|48|128.png` and the build must copy `extension/icons/` in.
+- **Orchestrator — misrouted message.** I received a coordination message carrying ground truth
+  from the **live claude.ai API** (two-org selection, the `chat_conversations` endpoint,
+  the `current_leaf_message_uuid` branch walk, the `thinking` block key, `attachments` vs
+  `files`). That is **Agent D's** territory — `extensions/claude/**` — and file ownership forbids
+  me from touching it, so I did not act on it. Please re-send it to Agent D. None of it applies
+  to Gemini, which has no such API.
+
+## Test coverage
+
+`node --test test/gemini-extract.test.mjs` → **48 pass, 2 skipped, 0 fail**; the full repo suite
+is green. Covered as required: a code block with a language *and* stripped "Copy code" (plus the
+`content_copy` mat-icon ligature and the caution footer), nested lists, tables, a thinking panel,
+and a turn with an image. Plus: blob-URL images rendering as `*(image — not exportable)*`,
+attachment shapes, chronological multi-turn ordering, three separate selector-miss degradations,
+the full CONTRACT typedef asserted on every message, metadata parsing, `extractConversation()`
+end to end, cross-surface fallback, and `expandCollapsed()` click discipline.
+
+**Skipped, with stated reasons, never faked:** (1) the live lazy-loading scroll, because a fake
+scroller would only be testing itself — the loop is bounded by construction and its warning path
+is asserted; (2) the real generated-image URL shape, which needs a live session with image
+generation — the scheme classification the decision depends on *is* tested.
