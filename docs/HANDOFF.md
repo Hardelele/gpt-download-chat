@@ -494,11 +494,13 @@ the manifest description, and drop `https://aistudio.google.com/*` from `host_pe
   `## ChatGPT`**, because `DEFAULT_OPTIONS.assistantLabel` is `'ChatGPT'`. Each build needs a
   per-platform default (`'Gemini'` here, `'Claude'` for Agent D). Suggested shape: a `PLATFORM`
   constant the build injects, or `assistantLabel` seeded from the manifest name.
-- **Agent C — build and verify.** `scripts/verify.mjs` currently only checks `extension/`
-  ("verify: OK — 16 files under extension/"). It does not look at `extensions/gemini/` or
-  `extensions/claude/`, so the name/description ↔ listing consistency it enforces for ChatGPT is
-  not enforced for the other two items. Also `extensions/gemini/icons/` does not exist yet — the
-  manifest references `icons/icon16|32|48|128.png` and the build must copy `extension/icons/` in.
+- **Agent C — build and verify.** Correction to an earlier draft of this note: `verify.mjs`
+  *does* handle other items via `--dir`. `node scripts/build.mjs --dir extensions/gemini` runs
+  and fails with exactly the 10 expected errors — the four `icons/*.png`, `src/popup/popup.html`
+  and `src/background.js` are the **shared shell files the orchestrator still has to hoist in**.
+  I deliberately did not copy them into my tree (Agent D did the same for `extensions/claude/`),
+  because duplicating Agent B's popup and Agent C's icon binaries across three trees is exactly
+  the duplication `CONTRACT-PLATFORMS.md` forbids. Nothing else in my tree blocks the build.
 - **Orchestrator — misrouted message.** I received a coordination message carrying ground truth
   from the **live claude.ai API** (two-org selection, the `chat_conversations` endpoint,
   the `current_leaf_message_uuid` branch walk, the `thinking` block key, `attachments` vs
