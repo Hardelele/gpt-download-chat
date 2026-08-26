@@ -1,0 +1,62 @@
+{
+  "manifest_version": 3,
+  "name": "Chat2MD for Gemini — Save chats as Markdown",
+  "version": "0.1.0",
+  "description": "Save any Gemini or AI Studio conversation as a clean Markdown file. Runs entirely in your browser — no account, no uploads.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "minimum_chrome_version": "111",
+  "action": {
+    "default_title": "Save this chat as Markdown",
+    "default_popup": "src/popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "downloads",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://gemini.google.com/*",
+    "https://aistudio.google.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://gemini.google.com/*",
+        "https://aistudio.google.com/*"
+      ],
+      "js": [
+        "src/content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "src/lib/*.js"
+      ],
+      "matches": [
+        "https://gemini.google.com/*",
+        "https://aistudio.google.com/*"
+      ]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}
