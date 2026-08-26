@@ -28,6 +28,8 @@ import { htmlToMarkdown } from '../../../../extension/src/lib/html2md.js';
 /** Emitted in place of an image a Markdown reader could never fetch. */
 export const NOT_EXPORTABLE_IMAGE = '*(image — not exportable)*';
 
+const BLOB_IMAGE_WARNING = 'One or more images use in-browser (blob/data) URLs and cannot be linked from the Markdown file.';
+
 /* ------------------------------------------------------------------ */
 /* Drop lists                                                          */
 /* ------------------------------------------------------------------ */
@@ -281,7 +283,7 @@ function sanitizeNode(node, ctx) {
       alt: alt || null,
     });
     if (!isExportableImageUrl(src)) {
-      ctx.warnings.add('One or more images use in-browser (blob/data) URLs and cannot be linked from the Markdown file.');
+      ctx.warnings.add(BLOB_IMAGE_WARNING);
       return el('p', {}, [txt(NOT_EXPORTABLE_IMAGE)]);
     }
     return el('img', { src, alt: alt || null });
@@ -367,6 +369,24 @@ export function parseUserQuery(node) {
   }
   const { markdown, attachments, warnings: w } = nodeToMarkdown(body);
   warnings.push(...w);
+
+  // Uploaded thumbnails sit in <user-query-file-preview>, i.e. *outside*
+  // .query-text, so the sanitizer above never saw them.
+  const alreadySeen = new Set(findAll(body, byTag('img')));
+  for (const img of findAll(node, byTag('img'))) {
+    if (alreadySeen.has(img) || isDecorativeImage(img)) continue;
+    const src = attrOf(img, 'src') || attrOf(img, 'data-src') || '';
+    const alt = (attrOf(img, 'alt') || '').trim();
+    attachments.push({
+      type: 'image',
+      name: alt || filenameFromUrl(src) || null,
+      url: src || null,
+      alt: alt || null,
+    });
+    if (!isExportableImageUrl(src) && !warnings.includes(BLOB_IMAGE_WARNING)) {
+      warnings.push(BLOB_IMAGE_WARNING);
+    }
+  }
 
   // File chips ("report.pdf") are rendered as previews, not <img>.
   for (const chip of findAll(node, byTag('user-query-file-preview', 'file-preview'))) {
