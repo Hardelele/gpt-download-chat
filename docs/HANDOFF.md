@@ -520,3 +520,11 @@ end to end, cross-surface fallback, and `expandCollapsed()` click discipline.
 scroller would only be testing itself — the loop is bounded by construction and its warning path
 is asserted; (2) the real generated-image URL shape, which needs a live session with image
 generation — the scheme classification the decision depends on *is* tested.
+
+**Agent F addendum — `verify.mjs` status for `extensions/aimode`.** `node scripts/verify.mjs
+--dir extensions/aimode` currently reports 10 errors, all of them missing shared assets
+(`icons/icon16|32|48|128.png`, `src/popup/popup.html`, `src/background.js`). `extensions/claude`
+and `extensions/gemini` report the identical 10, so this is the expected pre-hoist state for all
+three per-platform items, not a defect in any one of them. It should go green the moment the
+orchestrator copies the shared shell in. Everything `verify.mjs` checks that *is* mine —
+manifest schema, MV3 version, description length, permission set, no remote code — passes.
