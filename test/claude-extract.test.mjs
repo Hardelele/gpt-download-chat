@@ -10,10 +10,13 @@ import assert from 'node:assert/strict';
 
 import {
   parseConversationId,
+  parseSnapshotId,
   isShareUrl,
   toUnixSeconds,
   isArtifactBlock,
   renderArtifact,
+  renderFoldedArtifact,
+  collectArtifacts,
   renderContent,
   mapAttachments,
   flattenTree,
@@ -22,7 +25,9 @@ import {
   mapConversationPayload,
   fence,
   listOrganizationIds,
+  readCookie,
   fetchConversation,
+  fetchSnapshot,
   ROOT_PARENT_UUID,
 } from '../extensions/claude/src/lib/api-client.js';
 
@@ -483,16 +488,29 @@ test('nodeToMessages merges adjacent text blocks into a single turn', () => {
   assert.equal(msgs[0].text, 'one\n\ntwo');
 });
 
-test('nodeToMessages falls back to the legacy flat text field only when content is empty', () => {
-  const withBoth = nodeToMessages({
-    uuid: 'x', sender: 'human',
-    text: 'LEGACY',
-    content: [{ type: 'text', text: 'MODERN' }],
+test('nodeToMessages folds in a flat `text` field that content[] does not already contain', () => {
+  // An agent turn can put its final answer in `text` while content[] holds only
+  // thinking and tool blocks — dropping `text` would lose the answer.
+  const answerOnlyInText = nodeToMessages({
+    uuid: 'x', sender: 'assistant',
+    text: 'The answer is 42.',
+    content: [{ type: 'thinking', thinking: 'counting' }],
   });
-  assert.equal(withBoth[0].text, 'MODERN');
+  assert.deepEqual(answerOnlyInText.map((m) => m.contentType), ['thoughts', 'text']);
+  assert.equal(answerOnlyInText[1].text, 'The answer is 42.');
 
   const legacyOnly = nodeToMessages({ uuid: 'y', sender: 'human', text: 'LEGACY', content: [] });
   assert.equal(legacyOnly[0].text, 'LEGACY');
+});
+
+test('nodeToMessages does not duplicate text that is already a content block', () => {
+  const msgs = nodeToMessages({
+    uuid: 'x', sender: 'human',
+    text: 'Same thing',
+    content: [{ type: 'text', text: 'Same thing' }],
+  });
+  assert.equal(msgs.length, 1);
+  assert.equal(msgs[0].text, 'Same thing');
 });
 
 test('nodeToMessages returns nothing for an empty message', () => {
@@ -748,14 +766,215 @@ test('extractConversation throws only when both paths yield nothing', async () =
   );
 });
 
-test('extractConversation goes straight to the page for a /share/ link', async () => {
+test('extractConversation uses the snapshot endpoint for a /share/ link', async () => {
   const shareUrl = `https://claude.ai/share/${CONV}`;
-  const fetchFn = fakeFetch({});
+  const fetchFn = fakeFetch({ [`/api/chat_snapshots/${CONV}`]: fixture() });
+  const convo = await extractConversation({
+    fetch: fetchFn, location: { href: shareUrl, origin: 'https://claude.ai' },
+  });
+  assert.equal(convo.extractedVia, 'api');
+  assert.equal(convo.title, 'Sorting a CSV in Python');
+  assert.equal(fetchFn.calls.length, 1, 'a share link needs exactly one request');
+  assert.ok(!fetchFn.calls[0].includes('/api/organizations'), 'no org lookup for a share link');
+});
+
+test('extractConversation falls back to the page when the snapshot endpoint fails', async () => {
+  const shareUrl = `https://claude.ai/share/${CONV}`;
+  const fetchFn = fakeFetch({ [`/api/chat_snapshots/${CONV}`]: 404 });
   const doc = makeDocument(CLAUDE_PAGE, { href: shareUrl });
   const convo = await extractConversation({
     fetch: fetchFn, document: doc, location: { href: shareUrl, origin: 'https://claude.ai' }, scroll: false,
   });
   assert.equal(convo.extractedVia, 'dom');
-  assert.equal(fetchFn.calls.length, 0, 'no API call should be made for a share link');
   assert.ok(convo.warnings.some((w) => /Shared conversation link/.test(w)));
+});
+
+/* ------------------------------------------------------------------ */
+/* Artifact folding across revisions and across turns                  */
+/* ------------------------------------------------------------------ */
+
+/** create in one turn, update in the next. */
+function artifactBranch() {
+  return [
+    {
+      uuid: 'a1', parent_message_uuid: ROOT_PARENT_UUID, sender: 'assistant',
+      created_at: '2026-03-01T10:00:00Z',
+      content: [
+        { type: 'text', text: 'First draft:' },
+        {
+          type: 'tool_use', id: 't1', name: 'artifacts',
+          input: {
+            id: 'demo', command: 'create', type: 'application/vnd.ant.code',
+            language: 'python', title: 'demo.py', content: 'x = 1\ny = 2\n',
+            version_uuid: 'v1',
+          },
+        },
+      ],
+    },
+    {
+      uuid: 'a2', parent_message_uuid: 'a1', sender: 'human',
+      created_at: '2026-03-01T10:01:00Z',
+      content: [{ type: 'text', text: 'make x three' }],
+    },
+    {
+      uuid: 'a3', parent_message_uuid: 'a2', sender: 'assistant',
+      created_at: '2026-03-01T10:02:00Z',
+      content: [
+        {
+          type: 'tool_use', id: 't2', name: 'artifacts',
+          input: { id: 'demo', command: 'update', old_str: 'x = 1', new_str: 'x = 3', version_uuid: 'v2' },
+        },
+        { type: 'text', text: 'Done.' },
+      ],
+    },
+  ];
+}
+
+test('collectArtifacts replays create then update into the final content', () => {
+  const map = collectArtifacts(artifactBranch());
+  const demo = map.get('demo');
+  assert.equal(demo.content, 'x = 3\ny = 2\n');
+  assert.equal(demo.title, 'demo.py');
+  assert.equal(demo.language, 'python');
+  assert.equal(demo.revisions, 2);
+  assert.equal(demo.lastKey, 'a3|0', 'the artifact belongs to its last write');
+});
+
+test('collectArtifacts uses a function replacer so replacement patterns stay literal', () => {
+  // '$&' and the other $-patterns inside new_str would corrupt the artifact if
+  // the replacement were passed to String.replace as a plain string.
+  const dollarAmp = String.fromCharCode(36, 38);
+  const map = collectArtifacts([
+    {
+      uuid: 'm', sender: 'assistant',
+      content: [
+        {
+          type: 'tool_use', name: 'artifacts',
+          input: { id: 'a', command: 'create', content: 'const price = TOKEN;' },
+        },
+        {
+          type: 'tool_use', name: 'artifacts',
+          input: { id: 'a', command: 'update', old_str: 'TOKEN', new_str: `"${dollarAmp} cost"` },
+        },
+      ],
+    },
+  ]);
+  assert.equal(map.get('a').content, `const price = "${dollarAmp} cost";`);
+});
+
+test('an artifact is rendered once, at its final revision, not per draft', () => {
+  const convo = mapConversationPayload(
+    { uuid: 'c', name: 'Artifacts', current_leaf_message_uuid: 'a3', chat_messages: artifactBranch() },
+    { sourceUrl: 'https://claude.ai/chat/c' },
+  );
+  const codeMessages = convo.messages.filter((m) => m.contentType === 'code');
+  assert.equal(codeMessages.length, 1, 'intermediate drafts must not be emitted');
+  assert.match(codeMessages[0].text, /```python\nx = 3\ny = 2\n```/);
+  assert.match(codeMessages[0].text, /\*\*Artifact: demo\.py\*\*/);
+  assert.match(codeMessages[0].text, /Final version, after 1 revision\./);
+
+  // It lands in the last assistant turn, where the final revision was written.
+  assert.equal(convo.messages.indexOf(codeMessages[0]), convo.messages.length - 2);
+});
+
+test('renderFoldedArtifact derives the fence language from the artifact mime type', () => {
+  const out = renderFoldedArtifact({
+    content: '# Notes', title: 'Notes', type: 'text/markdown', language: null, revisions: 1,
+  });
+  assert.equal(out, '**Artifact: Notes**\n\n```markdown\n# Notes\n```');
+});
+
+test('renderFoldedArtifact returns null for an artifact with no content', () => {
+  assert.equal(renderFoldedArtifact({ content: '   ', revisions: 1 }), null);
+  assert.equal(renderFoldedArtifact(null), null);
+});
+
+/* ------------------------------------------------------------------ */
+/* Other verified block types                                          */
+/* ------------------------------------------------------------------ */
+
+test('renderContent reads a thinking block written as `summaries` and flags cut_off', () => {
+  const parts = renderContent([
+    { type: 'thinking', summaries: [{ summary: 'step one' }, { summary: 'step two' }], cut_off: true },
+  ]);
+  assert.equal(parts[0].kind, 'thoughts');
+  assert.equal(parts[0].text, 'step one\n\nstep two\n\n_(thinking was cut off)_');
+});
+
+test('renderContent renders a voice_note with its title', () => {
+  const parts = renderContent([{ type: 'voice_note', title: 'Memo', text: 'buy milk' }]);
+  assert.deepEqual(parts.map((p) => p.kind), ['text']);
+  assert.equal(parts[0].text, '**Memo**\n\nbuy milk');
+});
+
+test('renderContent renders create_file as code and infers the language from the path', () => {
+  const parts = renderContent([
+    { type: 'tool_use', id: 'c1', name: 'create_file', input: { path: 'app/main.py', file_text: 'print(1)' } },
+    { type: 'tool_result', tool_use_id: 'c1', name: 'create_file', content: [{ type: 'text', text: 'ok' }] },
+  ]);
+  assert.deepEqual(parts.map((p) => p.kind), ['code'], 'the "ok" result must be suppressed');
+  assert.match(parts[0].text, /\*\*File: app\/main\.py\*\*/);
+  assert.match(parts[0].text, /```python\nprint\(1\)\n```/);
+});
+
+test('renderContent keeps knowledge items in a tool_result instead of dropping them', () => {
+  const parts = renderContent([
+    {
+      type: 'tool_result', name: 'web_search',
+      content: [{ type: 'knowledge', title: 'A page', url: 'https://example.com', text: 'body text' }],
+    },
+  ]);
+  assert.match(parts[0].text, /A page — https:\/\/example\.com/);
+  assert.match(parts[0].text, /body text/);
+});
+
+/* ------------------------------------------------------------------ */
+/* Organization discovery                                              */
+/* ------------------------------------------------------------------ */
+
+test('listOrganizationIds puts the bootstrap membership first', async () => {
+  const fetchFn = fakeFetch({
+    '/api/bootstrap': { account: { memberships: [{ organization: { uuid: 'boot-org' } }] } },
+    '/api/organizations': [{ uuid: 'other-org', capabilities: ['chat'] }],
+  });
+  assert.deepEqual(await listOrganizationIds({ fetch: fetchFn }), ['boot-org', 'other-org']);
+});
+
+test('listOrganizationIds falls back to the lastActiveOrg cookie', async () => {
+  const fetchFn = fakeFetch({ '/api/bootstrap': 403, '/api/organizations': 403 });
+  const ids = await listOrganizationIds({
+    fetch: fetchFn,
+    cookie: `sessionKey=abc; lastActiveOrg=${ORG}; x=1`,
+  });
+  assert.deepEqual(ids, [ORG]);
+});
+
+test('readCookie picks the right value out of a jar and decodes it', () => {
+  assert.equal(readCookie('lastActiveOrg', `a=1; lastActiveOrg=${ORG}; b=2`), ORG);
+  assert.equal(readCookie('missing', 'a=1'), null);
+  assert.equal(readCookie('a', ''), null);
+  assert.equal(readCookie('a', 'a=hello%20world'), 'hello world');
+});
+
+test('fetchConversation asks for every branch and for full tool rendering', async () => {
+  const fetchFn = fakeFetch({
+    '/api/bootstrap': { account: { memberships: [{ organization: { uuid: ORG } }] } },
+    [`/organizations/${ORG}/chat_conversations/${CONV}`]: fixture(),
+  });
+  await fetchConversation(CONV, { fetch: fetchFn });
+  const convoCall = fetchFn.calls.find((u) => u.includes('chat_conversations'));
+  for (const param of ['tree=True', 'rendering_mode=messages', 'render_all_tools=true']) {
+    assert.ok(convoCall.includes(param), `missing ${param} in ${convoCall}`);
+  }
+});
+
+test('fetchSnapshot unwraps a payload nested under `conversation`', async () => {
+  const fetchFn = fakeFetch({ '/api/chat_snapshots/s1': { conversation: fixture() } });
+  const got = await fetchSnapshot('s1', { fetch: fetchFn });
+  assert.equal(got.uuid, CONV);
+});
+
+test('parseSnapshotId reads the id out of a share URL', () => {
+  assert.equal(parseSnapshotId(`https://claude.ai/share/${CONV}`), CONV);
+  assert.equal(parseSnapshotId(`https://claude.ai/chat/${CONV}`), null);
 });

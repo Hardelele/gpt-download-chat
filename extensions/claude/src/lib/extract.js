@@ -11,19 +11,25 @@
 
 import {
   parseConversationId,
+  parseSnapshotId,
   isShareUrl,
   extractViaApi,
+  extractSnapshotViaApi,
   mapConversationPayload,
   buildBranch,
   flattenTree,
   nodeToMessages,
   renderContent,
   renderArtifact,
+  renderFoldedArtifact,
+  collectArtifacts,
   isArtifactBlock,
   mapAttachments,
   toUnixSeconds,
   listOrganizationIds,
+  readCookie,
   fetchConversation,
+  fetchSnapshot,
   fence,
 } from './api-client.js';
 import {
@@ -147,8 +153,17 @@ export async function extractConversation(opts = {}) {
   let apiResult = null;
   if (!opts.preferDom) {
     if (isShareUrl(sourceUrl)) {
-      warnings.push('Shared conversation link — Claude\'s conversation API is not reachable here, '
-        + 'so the page itself was read instead.');
+      // Shared links have their own endpoint (`/api/chat_snapshots/<id>`),
+      // which still beats scraping the rendered snapshot page.
+      try {
+        apiResult = normalizeConversation(
+          await extractSnapshotViaApi({ ...opts, location: loc }),
+          { id: parseSnapshotId(sourceUrl) || conversationId, sourceUrl },
+        );
+      } catch (err) {
+        warnings.push('Shared conversation link — the snapshot API did not answer '
+          + `(${err && err.message ? err.message : err}), so the page itself was read instead.`);
+      }
     } else if (!conversationId) {
       warnings.push('Could not find a conversation id in the URL; the page itself was read instead. '
         + 'Open a chat at claude.ai/chat/… and try again.');
@@ -209,19 +224,25 @@ export async function extractConversation(opts = {}) {
 
 export {
   parseConversationId,
+  parseSnapshotId,
   isShareUrl,
   extractViaApi,
+  extractSnapshotViaApi,
   mapConversationPayload,
   buildBranch,
   flattenTree,
   nodeToMessages,
   renderContent,
   renderArtifact,
+  renderFoldedArtifact,
+  collectArtifacts,
   isArtifactBlock,
   mapAttachments,
   toUnixSeconds,
   listOrganizationIds,
+  readCookie,
   fetchConversation,
+  fetchSnapshot,
   fence,
   scrapeConversation,
   collectTurns,

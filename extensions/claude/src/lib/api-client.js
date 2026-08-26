@@ -123,8 +123,75 @@ export function isArtifactBlock(block) {
 }
 
 /**
- * Render an artifacts `tool_use` block as Markdown: a bold title line followed
- * by a fenced code block that keeps the artifact's language.
+ * Fold every artifact revision in a branch into its final content.
+ *
+ * One artifact is authored across *many* `tool_use` blocks, often spread over
+ * several assistant turns: a `create` with the full body, then `update` blocks
+ * carrying only `old_str`/`new_str`, and sometimes a `rewrite` with a fresh
+ * body. Rendering each block would emit every intermediate draft, so we replay
+ * them here and remember which block is the last one for each artifact id —
+ * that is the only place the finished artifact gets rendered.
+ *
+ * @param {object[]} nodes  branch nodes, in order
+ * @returns {Map<string, {id:string, content:string, title:string|null,
+ *                        type:string|null, language:string|null,
+ *                        lastKey:string|null, revisions:number}>}
+ */
+export function collectArtifacts(nodes) {
+  const map = new Map();
+  asArray(nodes).forEach((node, ni) => {
+    const nodeKey = messageId(node) || `#${ni}`;
+    asArray(node && node.content).forEach((block, bi) => {
+      if (!isArtifactBlock(block)) return;
+      const input = (block.input && typeof block.input === 'object') ? block.input : {};
+      const id = firstString(input.id) || '__artifact__';
+      const entry = map.get(id) || {
+        id, content: '', title: null, type: null, language: null, lastKey: null, revisions: 0,
+      };
+      const command = typeof input.command === 'string' ? input.command : 'create';
+
+      if (command === 'update' && typeof input.old_str === 'string' && typeof input.new_str === 'string') {
+        // A *function* replacer, deliberately: `$&`, `` $` ``, `$'` and `$$`
+        // inside new_str would otherwise be read as replacement patterns and
+        // silently corrupt the artifact.
+        entry.content = entry.content.replace(input.old_str, () => input.new_str);
+      } else if (typeof input.content === 'string') {
+        entry.content = input.content;
+      } else if (typeof input.new_str === 'string') {
+        entry.content = input.new_str;
+      }
+
+      if (firstString(input.title)) entry.title = input.title;
+      if (firstString(input.type)) entry.type = input.type;
+      if (firstString(input.language)) entry.language = input.language;
+      entry.revisions += 1;
+      entry.lastKey = `${nodeKey}|${bi}`;
+      map.set(id, entry);
+    });
+  });
+  return map;
+}
+
+/**
+ * Render a folded artifact: a bold title line, then a fenced block that keeps
+ * the artifact's language.
+ * @param {{content:string, title:string|null, type:string|null,
+ *          language:string|null, revisions:number}} entry
+ * @returns {string|null}
+ */
+export function renderFoldedArtifact(entry) {
+  if (!entry || typeof entry.content !== 'string' || !entry.content.trim()) return null;
+  const language = firstString(entry.language, ARTIFACT_TYPE_LANGUAGE[entry.type]) || '';
+  const heading = entry.title ? `**Artifact: ${entry.title}**` : '**Artifact**';
+  const note = entry.revisions > 1
+    ? `\n\n_Final version, after ${entry.revisions - 1} revision${entry.revisions > 2 ? 's' : ''}._`
+    : '';
+  return `${heading}${note}\n\n${fence(entry.content, language)}`;
+}
+
+/**
+ * Render a single artifacts `tool_use` block in isolation — used when no folded
+ * artifact map is available (direct callers, tests, malformed payloads).
  * @param {object} block
  * @returns {{text:string, title:string|null, language:string}|null}
  */
@@ -189,12 +256,57 @@ function toolResultText(block) {
   if (typeof content === 'string') return content;
   const chunks = [];
   for (const item of asArray(content)) {
-    if (typeof item === 'string') chunks.push(item);
-    else if (item && typeof item.text === 'string') chunks.push(item.text);
-    else if (item && item.type === 'image') chunks.push('_(image result)_');
-    else if (item) chunks.push(safeJson(item));
+    if (typeof item === 'string') {
+      chunks.push(item);
+    } else if (item && item.type === 'knowledge') {
+      // Share-snapshot payloads return search results as `knowledge` items.
+      // Matching only `type === 'text'` here throws most of the payload away.
+      const head = [item.title, item.url].filter(Boolean).join(' — ');
+      chunks.push([head, item.text].filter(Boolean).join('\n'));
+    } else if (item && typeof item.text === 'string') {
+      chunks.push(item.text);
+    } else if (item && item.type === 'image') {
+      chunks.push('_(image result)_');
+    } else if (item) {
+      chunks.push(safeJson(item));
+    }
   }
-  return chunks.join('\n\n');
+  return chunks.filter((c) => c && c.trim()).join('\n\n');
+}
+
+/**
+ * Tools other than `artifacts` whose input carries real content the reader
+ * wants, rather than plumbing worth dumping as JSON.
+ * name -> [content field, language field or literal, title field]
+ */
+const CONTENT_TOOLS = {
+  create_file: { body: 'file_text', title: 'path' },
+  'visualize:show_widget': { body: 'widget_code', title: 'title', language: 'jsx' },
+};
+
+function renderContentTool(block) {
+  const spec = CONTENT_TOOLS[block && block.name];
+  if (!spec) return null;
+  const input = (block.input && typeof block.input === 'object') ? block.input : {};
+  const body = input[spec.body];
+  if (typeof body !== 'string' || !body.trim()) return null;
+  const title = firstString(input[spec.title]);
+  const language = spec.language || languageFromPath(title) || '';
+  return `**${block.name === 'create_file' ? 'File' : 'Widget'}${title ? `: ${title}` : ''}**\n\n${fence(body, language)}`;
+}
+
+const EXT_LANGUAGE = {
+  js: 'javascript', mjs: 'javascript', ts: 'typescript', tsx: 'tsx', jsx: 'jsx',
+  py: 'python', rb: 'ruby', go: 'go', rs: 'rust', java: 'java', kt: 'kotlin',
+  c: 'c', h: 'c', cpp: 'cpp', cs: 'csharp', php: 'php', sh: 'bash', bash: 'bash',
+  sql: 'sql', json: 'json', yml: 'yaml', yaml: 'yaml', toml: 'toml', xml: 'xml',
+  html: 'html', css: 'css', scss: 'scss', md: 'markdown', csv: 'csv', r: 'r',
+};
+
+function languageFromPath(path) {
+  if (typeof path !== 'string') return null;
+  const m = /\.([a-z0-9]+)$/i.exec(path.trim());
+  return m ? (EXT_LANGUAGE[m[1].toLowerCase()] || null) : null;
 }
 
 function safeJson(value) {
@@ -211,46 +323,78 @@ function safeJson(value) {
  * untouched — they must never be round-tripped through HTML.
  *
  * @param {object[]} blocks
+ * @param {{artifacts?:Map, messageKey?:string}} [ctx]  folded-artifact context
+ *        from `collectArtifacts`; without it each artifact block renders alone.
  * @returns {Part[]}
  */
-export function renderContent(blocks) {
+export function renderContent(blocks, ctx = {}) {
   const parts = [];
   const artifactToolUseIds = new Set();
+  const list = asArray(blocks);
 
-  for (const block of asArray(blocks)) {
+  for (let i = 0; i < list.length; i++) {
+    const block = list[i];
     if (!block || typeof block !== 'object') continue;
     const type = typeof block.type === 'string' ? block.type : '';
 
-    if (type === 'text') {
+    if (type === 'text' || type === 'voice_note') {
       const text = typeof block.text === 'string' ? block.text : '';
-      if (text.trim()) parts.push({ kind: 'text', text, authorName: null, hidden: false });
+      const title = type === 'voice_note' ? firstString(block.title) : null;
+      if (text.trim()) {
+        parts.push({
+          kind: 'text',
+          text: title ? `**${title}**\n\n${text}` : text,
+          authorName: null,
+          hidden: false,
+        });
+      }
       continue;
     }
 
     if (type === 'thinking' || type === 'redacted_thinking') {
-      const text = firstString(block.thinking, block.text, block.summary) || '';
+      const summaries = asArray(block.summaries)
+        .map((s) => (typeof s === 'string' ? s : firstString(s && s.summary, s && s.text)))
+        .filter(Boolean)
+        .join('\n\n');
+      const text = firstString(block.thinking, block.text, summaries, block.summary) || '';
+      const cutOff = block.cut_off === true ? '\n\n_(thinking was cut off)_' : '';
       if (type === 'redacted_thinking' && !text.trim()) {
         parts.push({
           kind: 'thoughts', text: '_(redacted thinking)_', authorName: null, hidden: false,
         });
       } else if (text.trim()) {
-        parts.push({ kind: 'thoughts', text, authorName: null, hidden: false });
+        parts.push({ kind: 'thoughts', text: text + cutOff, authorName: null, hidden: false });
       }
       continue;
     }
 
     if (type === 'tool_use' || type === 'server_tool_use') {
       if (isArtifactBlock(block)) {
-        const artifact = renderArtifact(block);
-        if (artifact) {
-          artifactToolUseIds.add(block.id);
-          parts.push({ kind: 'code', text: artifact.text, authorName: null, hidden: false });
-        } else {
-          // An artifact command we could not render (e.g. a no-op update).
-          artifactToolUseIds.add(block.id);
+        artifactToolUseIds.add(block.id);
+        const input = (block.input && typeof block.input === 'object') ? block.input : {};
+        const artifactId = firstString(input.id) || '__artifact__';
+        const entry = ctx.artifacts && ctx.artifacts.get(artifactId);
+        if (entry) {
+          // Only the final revision of each artifact is rendered, and only at
+          // the block where that revision was written.
+          if (entry.lastKey !== `${ctx.messageKey}|${i}`) continue;
+          const text = renderFoldedArtifact(entry);
+          if (text) parts.push({ kind: 'code', text, authorName: null, hidden: false });
+          continue;
         }
+        const artifact = renderArtifact(block);
+        if (artifact) parts.push({ kind: 'code', text: artifact.text, authorName: null, hidden: false });
         continue;
       }
+
+      const contentTool = renderContentTool(block);
+      if (contentTool) {
+        // The matching result is a bare "ok" — the content is already rendered.
+        artifactToolUseIds.add(block.id);
+        parts.push({ kind: 'code', text: contentTool, authorName: null, hidden: false });
+        continue;
+      }
+
       const name = firstString(block.name) || 'tool';
       const input = block.input === undefined ? '' : safeJson(block.input);
       parts.push({
@@ -498,7 +642,7 @@ const SENDER_ROLE = { human: 'user', user: 'user', assistant: 'assistant', ai: '
  * `includeThoughts` / `includeTools` instead of them being welded into the prose.
  *
  * @param {object} node
- * @param {{origin?:string}} [opts]
+ * @param {{origin?:string, artifacts?:Map, index?:number}} [opts]
  * @returns {import('./extract.js').Message[]}
  */
 export function nodeToMessages(node, opts = {}) {
@@ -510,11 +654,21 @@ export function nodeToMessages(node, opts = {}) {
   const baseId = messageId(node);
   const attachments = mapAttachments(node, opts.origin);
 
-  let parts = renderContent(node.content);
-  if (!parts.length) {
-    // Legacy flat field. Only used when `content` gave us nothing.
-    const legacy = typeof node.text === 'string' ? node.text : '';
-    if (legacy.trim()) parts = [{ kind: 'text', text: legacy, authorName: null, hidden: false }];
+  const parts = renderContent(node.content, {
+    artifacts: opts.artifacts,
+    messageKey: baseId || `#${opts.index == null ? 0 : opts.index}`,
+  });
+
+  // `text` and `content[]` coexist: under `rendering_mode=messages` `text` is
+  // usually empty, but an agent turn can carry its final answer in `text` while
+  // `content[]` holds only thinking and tool blocks. So fold it in whenever it
+  // is not already part of the rendered prose — never short-circuit on it.
+  const legacy = typeof node.text === 'string' ? node.text.trim() : '';
+  if (legacy) {
+    const prose = parts.filter((p) => p.kind === 'text').map((p) => p.text).join('\n');
+    if (!prose.includes(legacy)) {
+      parts.push({ kind: 'text', text: legacy, authorName: null, hidden: false });
+    }
   }
 
   // Merge adjacent prose so a message split across several text blocks reads
@@ -608,14 +762,18 @@ export function mapConversationPayload(payload, opts = {}) {
     );
   }
 
+  // Artifacts are authored across many blocks and many turns; fold them first
+  // so only the finished version of each is rendered.
+  const artifacts = collectArtifacts(branch);
+
   const messages = [];
-  for (const node of branch) {
+  branch.forEach((node, index) => {
     try {
-      messages.push(...nodeToMessages(node, { origin: opts.origin }));
+      messages.push(...nodeToMessages(node, { origin: opts.origin, artifacts, index }));
     } catch (err) {
       warnings.push(`Skipped one message that could not be read (${err && err.message ? err.message : err}).`);
     }
-  }
+  });
 
   const model = firstString(p.model, p.settings && p.settings.model)
     || lastModel(branch)
@@ -679,32 +837,68 @@ async function getJson(url, opts = {}) {
  */
 export async function listOrganizationIds(opts = {}) {
   const origin = opts.origin || 'https://claude.ai';
-  let orgs = [];
+  const seen = new Set();
+  const out = [];
+  const push = (id) => {
+    const v = firstString(id);
+    if (v && !seen.has(v)) {
+      seen.add(v);
+      out.push(v);
+    }
+  };
+
+  // 1. /api/bootstrap. This is what claude.ai's own client uses; it names the
+  //    active membership directly, which /api/organizations does not.
   try {
-    orgs = await getJson(`${origin}/api/organizations`, opts);
+    const boot = await getJson(`${origin}/api/bootstrap`, opts);
+    for (const m of asArray(boot && boot.account && boot.account.memberships)) {
+      push(m && m.organization && (m.organization.uuid || m.organization.id));
+    }
+  } catch { /* older or changed build: fall through */ }
+
+  // 2. The `lastActiveOrg` cookie, readable from the content script.
+  push(readCookie('lastActiveOrg', opts.cookie));
+
+  // 3. /api/organizations, chat-capable orgs before API-only (Console) orgs.
+  try {
+    const orgs = asArray(await getJson(`${origin}/api/organizations`, opts))
+      .filter((o) => o && firstString(o.uuid, o.id));
+    const score = (o) => {
+      const caps = asArray(o.capabilities).map((c) => String(c).toLowerCase());
+      let s = 0;
+      if (caps.includes('chat')) s += 100;
+      if (caps.some((c) => c.startsWith('claude_'))) s += 10;
+      if (caps.includes('api') && !caps.includes('chat')) s -= 50;
+      if (o.active_flags || o.is_active) s += 5;
+      return s;
+    };
+    for (const o of orgs.slice().sort((a, b) => score(b) - score(a))) push(o.uuid || o.id);
   } catch (err) {
-    // Fall back to the bootstrap payload, which also carries memberships.
-    const boot = await getJson(`${origin}/api/bootstrap`, opts).catch(() => null);
-    const memberships = asArray(boot && boot.account && boot.account.memberships);
-    orgs = memberships.map((m) => (m && m.organization) || {});
-    if (!orgs.length) throw err;
+    if (!out.length) throw err;
   }
 
-  const list = asArray(orgs).filter((o) => o && firstString(o.uuid, o.id));
-  const score = (o) => {
-    const caps = asArray(o.capabilities).map((c) => String(c).toLowerCase());
-    let s = 0;
-    if (caps.includes('chat')) s += 100;
-    if (caps.some((c) => c.startsWith('claude_'))) s += 10;
-    if (caps.includes('api') && !caps.includes('chat')) s -= 50;
-    if (o.active_flags || o.is_active) s += 5;
-    return s;
-  };
-  return list
-    .slice()
-    .sort((a, b) => score(b) - score(a))
-    .map((o) => firstString(o.uuid, o.id))
-    .filter(Boolean);
+  return out;
+}
+
+/** Read one cookie value; `jar` lets tests inject a cookie string. */
+export function readCookie(name, jar) {
+  const raw = typeof jar === 'string'
+    ? jar
+    : (typeof globalThis !== 'undefined' && globalThis.document
+      && typeof globalThis.document.cookie === 'string' ? globalThis.document.cookie : '');
+  if (!raw) return null;
+  for (const pair of raw.split(';')) {
+    const i = pair.indexOf('=');
+    if (i === -1) continue;
+    if (pair.slice(0, i).trim() === name) {
+      try {
+        return decodeURIComponent(pair.slice(i + 1).trim()) || null;
+      } catch {
+        return pair.slice(i + 1).trim() || null;
+      }
+    }
+  }
+  return null;
 }
 
 /**
@@ -723,7 +917,11 @@ export async function fetchConversation(conversationId, opts = {}) {
 
   if (!orgIds.length) throw new Error('no organization found for this session');
 
-  const query = 'tree=True&rendering_mode=messages&render_all_tools=true';
+  // `tree=True` is what makes the response carry every branch; without it the
+  // server picks a linear path for us. `render_all_tools` keeps tool blocks
+  // from collapsing to "not supported on your current device".
+  const query = 'tree=True&rendering_mode=messages&render_all_tools=true'
+    + '&skip_uuid_injection=true&consistency=strong';
   let lastError = null;
   for (const orgId of orgIds) {
     const url = `${origin}/api/organizations/${orgId}/chat_conversations/${conversationId}?${query}`;
@@ -737,6 +935,62 @@ export async function fetchConversation(conversationId, opts = {}) {
   }
   void warnings;
   throw lastError || new Error('conversation could not be fetched');
+}
+
+/**
+ * Snapshot id out of a `claude.ai/share/<uuid>` URL.
+ * @param {string} url
+ * @returns {string|null}
+ */
+export function parseSnapshotId(url) {
+  if (typeof url !== 'string' || !url) return null;
+  let pathname = url;
+  try {
+    pathname = new URL(url, 'https://claude.ai').pathname;
+  } catch { /* treat as a path */ }
+  const m = /\/share\/([0-9a-f-]{36})/i.exec(pathname);
+  return m ? m[1] : null;
+}
+
+/**
+ * Shared conversations are served by their own endpoint, which needs no org and
+ * no session. Much better than scraping the snapshot page.
+ *
+ * @param {string} snapshotId
+ * @param {{fetch?:Function, origin?:string}} [opts]
+ * @returns {Promise<object>} raw payload
+ */
+export async function fetchSnapshot(snapshotId, opts = {}) {
+  const origin = opts.origin || 'https://claude.ai';
+  const url = `${origin}/api/chat_snapshots/${snapshotId}`
+    + '?rendering_mode=messages&render_all_tools=true';
+  const payload = await getJson(url, opts);
+  // Some builds wrap the conversation one level down.
+  if (payload && typeof payload === 'object' && !payload.chat_messages && payload.conversation) {
+    return payload.conversation;
+  }
+  return payload;
+}
+
+/**
+ * Full API path for a shared snapshot link.
+ * @param {{fetch?:Function, location?:object, snapshotId?:string}} [opts]
+ * @returns {Promise<import('./extract.js').Conversation>}
+ */
+export async function extractSnapshotViaApi(opts = {}) {
+  const loc = opts.location
+    || (typeof globalThis !== 'undefined' && globalThis.location)
+    || { href: '', origin: 'https://claude.ai' };
+  const origin = loc.origin || 'https://claude.ai';
+  const sourceUrl = loc.href || '';
+  const snapshotId = opts.snapshotId || parseSnapshotId(sourceUrl);
+  if (!snapshotId) throw new Error('no snapshot id in the URL');
+
+  const warnings = [];
+  const payload = await fetchSnapshot(snapshotId, { ...opts, origin });
+  return mapConversationPayload(payload, {
+    sourceUrl, conversationId: snapshotId, origin, warnings,
+  });
 }
 
 /**

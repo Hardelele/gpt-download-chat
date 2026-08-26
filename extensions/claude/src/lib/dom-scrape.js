@@ -13,17 +13,28 @@
 
 import { htmlToMarkdown } from '../../../../extension/src/lib/html2md.js';
 
+/*
+ * Selector notes (checked against live claude.ai DOM inventories, mid-2026):
+ *   - `[data-testid="user-message"]` is real and stable.
+ *   - There is NO `data-testid="assistant-message"`. Assistant turns are found
+ *     by `.font-claude-response`.
+ *   - `.font-claude-message` is DEAD (it was the old class). Kept last, purely
+ *     so old builds and cached pages still work.
+ *   - `div[data-test-render-count]` is the per-turn container for *both* roles,
+ *     but it is a render-internal attribute and may vanish without notice.
+ * All of this is why the API path is primary and this file is the fallback.
+ */
+
 /** Selectors that identify a human turn, most specific first. */
 export const USER_SELECTORS = [
   '[data-testid="user-message"]',
-  'div[data-testid="user-message"]',
   '.font-user-message',
 ];
 
 /** Selectors that identify an assistant turn, most specific first. */
 export const ASSISTANT_SELECTORS = [
-  '[data-testid="assistant-message"]',
   '.font-claude-response',
+  '[data-testid="assistant-message"]',
   '.font-claude-message',
 ];
 
@@ -31,6 +42,15 @@ export const ASSISTANT_SELECTORS = [
 const TURN_WRAPPER_SELECTORS = [
   'div[data-test-render-count]',
   '[data-testid="chat-message"]',
+];
+
+/**
+ * The rendered Markdown body inside a turn. `.progressive-markdown` is used
+ * while a reply streams, `.standard-markdown` once it is complete.
+ */
+const BODY_SELECTORS = [
+  '.standard-markdown',
+  '.progressive-markdown',
 ];
 
 /** Claude's "thinking"/extended-reasoning disclosure inside an assistant turn. */
@@ -121,6 +141,21 @@ function wrapperOf(el) {
   return el;
 }
 
+/**
+ * Prefer the rendered Markdown container over the whole turn: the turn element
+ * also holds the copy / retry / read-aloud action bar, whose labels would
+ * otherwise end up in the transcript.
+ * @param {Element} el
+ */
+function bodyOf(el) {
+  const bodies = [];
+  for (const selector of BODY_SELECTORS) bodies.push(...qa(el, selector));
+  if (!bodies.length) return el;
+  if (bodies.length === 1) return bodies[0];
+  // Several markdown containers in one turn: keep the outermost.
+  return dedupeNested(bodies)[0] || bodies[0];
+}
+
 function detachThoughts(el) {
   // Extended thinking is rendered inside the assistant turn. Pull it out so it
   // lands on its own contract message with contentType 'thoughts'.
@@ -171,7 +206,7 @@ export function turnToMessages(el) {
     detach(thoughtsEl);
   }
 
-  const text = String(htmlToMarkdown(el) || '').trim();
+  const text = String(htmlToMarkdown(bodyOf(el)) || '').trim();
 
   const attachments = qa(wrapper, 'img')
     .map((img) => ({
