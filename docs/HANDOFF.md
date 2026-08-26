@@ -704,3 +704,220 @@ hoist should run those three lines and then `node scripts/verify.mjs --dir exten
 - Optional promo tiles (440×280, 1400×560). Not generated; only needed for store featuring.
 - `dist/` is gitignored by design — CI publishes the zip as a build artifact.
 
+
+---
+
+## Agent D — claude.ai extractor
+
+**Owned and delivered:** `extensions/claude/**`, `test/claude-extract.test.mjs`, `store/claude/**`.
+64 tests, all green (`node --test`). Nothing outside those paths was touched.
+
+```
+extensions/claude/manifest.json          MV3, host_permissions: https://claude.ai/*
+extensions/claude/src/lib/api-client.js  primary path: claude.ai's own conversation JSON
+extensions/claude/src/lib/dom-scrape.js  fallback path: rendered page + bounded scroll
+extensions/claude/src/lib/extract.js     extractConversation(opts) -> Conversation
+test/claude-extract.test.mjs             64 tests, zero dependencies
+store/claude/listing.md                  store copy + permissions justification
+```
+
+`extractConversation()` matches Agent A's signature and option bag
+(`{conversationId, document, location, fetch, preferDom, scroll, maxIterations, waitMs}`)
+and returns the CONTRACT typedef unchanged. `normalizeConversation` guarantees every key.
+
+### Blockers — things I need from other agents (I did NOT write them, per CONTRACT-PLATFORMS)
+
+1. **`extensions/claude/` is not yet a loadable extension.** `node scripts/verify.mjs --dir
+   extensions/claude` fails with 10 errors, all of them missing *shared* files that the
+   orchestrator is due to hoist. Nothing in the manifest itself is wrong — all the
+   manifest-content checks pass. Still needed inside `extensions/claude/`:
+   - `icons/icon16|32|48|128.png`
+   - `src/popup/popup.html|popup.css|popup.js`
+   - `src/background.js`, `src/content.js`
+   - `src/lib/markdown.js`, `src/lib/filename.js`, `src/lib/html2md.js`
+2. **`dom-scrape.js` imports html2md by relative path** —
+   `import { htmlToMarkdown } from '../../../../extension/src/lib/html2md.js';` — which reaches
+   outside the extension directory and therefore cannot be packaged as-is. When html2md moves to
+   `shared/` (or is copied into each extension), that one import line is the only thing to
+   rewrite. Per the contract I did not write a second converter.
+3. **Renderer labels.** `markdown.js` defaults `assistantLabel: 'ChatGPT'`. For this build it
+   should be `Claude`. Agent B / orchestrator: either make the label platform-configurable or
+   let each extension pass `{assistantLabel:'Claude'}`. I did not touch `markdown.js`.
+4. **Screenshots.** `store/claude/assets/` is empty; the listing marks two 1280x800 captures as
+   TODO. They need a real claude.ai session, so a human has to take them.
+
+### Requests against files I do not own
+
+- **Agent B / `markdown.js`:** the render filter is
+  `if (m.hidden === true && !o.includeSystem) return false;`. That means a message marked
+  `hidden` needs `includeSystem`, *not* `includeThoughts` / `includeTools`. So I deliberately
+  emit thinking with `contentType:'thoughts', hidden:false` and tool traffic with
+  `role:'tool', hidden:false`, which is the only way those two options do anything. This differs
+  from the "mark them hidden" sketch in my brief and is intentional — if `markdown.js` ever
+  changes that line, tell me before it lands.
+- **Attachment typedef:** claude.ai puts the *text* of an uploaded document in
+  `attachments[].extracted_content`. The `Attachment` typedef has no field for content, so I drop
+  it. A user message that is "here's my spec, review it" therefore exports without the spec.
+  Adding an optional `content: string|null` to `Attachment` would fix it; I did not add a field
+  to a shared typedef unilaterally.
+
+### What I verified against reality vs. what is still an assumption
+
+Verified against Anthropic's own docs plus live API/DOM probes and several mature open-source
+claude.ai exporters (`daymade/claude-code-skills`, `sfmig/claude-conversation-tree`,
+`agarwalvishal/claude-chat-exporter`, `osteele/claude-chat-viewer`, `lugia19/Claude-QoL`,
+`Azzoril/claude-font-fix`):
+
+- `GET /api/organizations` and
+  `GET /api/organizations/<org>/chat_conversations/<conv>?tree=True&rendering_mode=messages`
+  are real. `tree=True` is specifically what makes the response contain *every* branch;
+  without it the server returns a pre-flattened path. Added `render_all_tools=true` because
+  without it tool blocks collapse to "not supported on your current device", plus
+  `skip_uuid_injection=true&consistency=strong`, which the real front-end sends.
+- **`/api/bootstrap` is the right way to find the active org**, not `/api/organizations` —
+  the latter lists memberships without saying which is active. Order is now
+  bootstrap -> `lastActiveOrg` cookie -> `/api/organizations`, then each candidate is tried
+  until one resolves the conversation.
+- Field names: **`chat_messages`** (not `messages`); **`sender: 'human'|'assistant'`** (not
+  `role`, not `'user'`); `parent_message_uuid` with root sentinel
+  `00000000-0000-4000-8000-000000000000`; `current_leaf_message_uuid` on the conversation.
+- **`text` and `content[]` coexist.** Under `rendering_mode=messages` `text` is usually empty,
+  but an agent turn can carry its final answer in `text` while `content[]` holds only thinking
+  and tool blocks. Treating `text` as a pure fallback loses answers, so it is folded in whenever
+  it is not already present in the rendered prose.
+- Block types `text`, `thinking`, `tool_use`, `tool_result` confirmed, **plus `voice_note`**.
+  Thinking uses the field `thinking` (not `text`), and may carry `summaries[]` and `cut_off`.
+- **Artifacts are authored across many `tool_use` blocks and many turns**, folded by `input.id`:
+  `create`/`rewrite` carry full `content`, `update` carries only `old_str`/`new_str`. Rendering
+  each block emits every intermediate draft, so `collectArtifacts()` replays the whole sequence
+  and only the final revision is rendered, once. The replacement uses a *function* replacer
+  because `$&` and friends inside `new_str` would otherwise be read as replacement patterns and
+  silently corrupt the artifact. Artifacts render as `role:'assistant', contentType:'code'` and
+  are visible by default — they are usually the most valuable thing in the chat.
+- Same-origin `fetch(..., {credentials:'include'})` is sufficient. **No CSRF token and no
+  `anthropic-*` header is required for GETs** (the `anthropic-client-platform` header I send is
+  cosmetic). Unverified for POST/DELETE, which this extension never issues.
+- Shared links have their own endpoint,
+  `GET /api/chat_snapshots/<id>?rendering_mode=messages&render_all_tools=true`, which needs no
+  org and no session. `/share/` URLs now use it instead of scraping, falling back to the page.
+  Caveat: snapshot `tool_result.content[]` items can be `type:'knowledge'` rather than `'text'`;
+  matching only `'text'` was measured to retain ~5% of one payload, so `knowledge` is handled.
+- **DOM selectors — my brief's list was partly wrong and is corrected:**
+  `[data-testid="user-message"]` is real. **There is no `data-testid="assistant-message"`**, and
+  **`.font-claude-message` is dead**; `.font-claude-response` is the live assistant selector.
+  `div[data-test-render-count]` is the per-turn wrapper for both roles but is a render-internal
+  attribute. Message bodies are `.standard-markdown` (complete) / `.progressive-markdown`
+  (streaming) — I read those so the copy/retry/read-aloud action bar stays out of the transcript.
+- **Store claim verified.** claude.ai has no per-conversation export. Anthropic's help article
+  "Export your Claude data" (updated 8 July 2026) documents only an account-wide
+  Settings -> Privacy -> Export data request delivered by email. The listing cites it and
+  deliberately does **not** assert the archive's file format, which the article never states.
+
+Still assumed, not verified:
+- The exact `attachments[]` / `files[]` field spellings vary by build, so `mapAttachments`
+  probes several (`file_name`/`name`, `preview_url`/`preview_asset.url`/`document_asset.url`).
+  Attachment URLs are the least-tested part of this extractor.
+- No live request was made against a signed-in claude.ai session from this machine — driving the
+  user's authenticated account was out of scope for an unattended agent. Everything network-side
+  is exercised through an injected `fetch`, so the *plumbing* is tested but the *live response*
+  is not. First manual run should be on a chat containing an artifact that was edited at least
+  once, an uploaded file, and a regenerated answer.
+- Claude's DOM has no reliable hook for the extended-thinking block. I match a few `data-testid`
+  candidates; if none hit, thinking silently merges into the assistant prose on the fallback path
+  only. The API path is unaffected.
+
+### Risks
+
+1. **Everything above is a private API.** No compatibility promise. The mitigation is that both
+   paths exist, the API path never throws for a recoverable problem, and every degradation
+   pushes a human-readable line into `warnings[]`.
+2. **The DOM fallback is genuinely weak on claude.ai** — no message ids anywhere in the DOM,
+   no reliable timestamps, virtualised transcripts, and React/JSX artifact previews live in a
+   cross-origin `iframe[src*="claudeusercontent.com"]` that an extension cannot read at all.
+   If the API path breaks, artifacts are lost. This is worth a visible warning in the popup.
+3. `div[data-test-render-count]` and the Tailwind-derived class names will change without notice.
+   Treat the fallback as best-effort and re-check selectors before each release.
+
+### Agent D — addendum after the coordinator's live-API ground truth
+
+The section above was written before the coordinator sent measurements taken against a
+**logged-in claude.ai session**. Where that contradicted what I had built, it won. Corrections
+landed in `d7efc10` and the commit after it. **Test count is now 80, all green**, and the full
+suite (`node --test`) is 268 passing.
+
+Reconciled:
+
+- **`manifest.json` → `name` is now mark-free: `Chat2MD — AI Chat to Markdown`.** CLAUDE is a
+  registered trademark (Reg. 7645254) and Anthropic publishes no nominative-use carve-out, so
+  the earlier `Chat2MD for Claude` was a real risk. Compatibility moved into the description
+  body ("Works with claude.ai"), and a TRADEMARKS / non-affiliation paragraph is now part of the
+  store copy. `store/claude/listing.md` has a "Trademark constraint" section explaining why, so
+  nobody renames it back. **Agents E and F: the same reasoning applies to Gemini and to Google's
+  marks — worth checking your manifest names.**
+- **Org selection.** Confirmed the two-org trap on a real account:
+  `["chat","claude_max"]` holds the conversations, `["api","api_individual"]` holds none.
+  `fetchConversation` now tries the `lastActiveOrg` cookie *before any request at all*, then
+  `/api/bootstrap`, then `/api/organizations` sorted by capability, attempting each until one
+  resolves the conversation. `orgs[0]` is never trusted. Two-org test added.
+- **`render_all_tools=true`** was already in the query string; confirmed correct.
+- **`message.truncated`** now raises a warning. **thinking blocks** now honour
+  `truncated`, `cut_off`, `hidden` and `thinking_hidden` — the last two set the contract's
+  `hidden` flag, since Claude itself marks that reasoning as not for display.
+- **Thinking text is read from `b.thinking`, never `b.text`** (reading `text` yields empty
+  reasoning). Already correct; now asserted by a test against a block carrying both.
+- **Unknown block types are never dropped.** `tool_use`/`tool_result` did not appear in the
+  sampled conversations, so my type list is certainly incomplete. Anything unrecognised falls
+  back to `text` → `thinking` → `input` (as JSON) → the whole block, is counted, and produces
+  one conversation-level warning naming the types seen. Artifact handling is gated on the block
+  actually looking like an artifact, so it is inert when none appear.
+- **`attachments[].extracted_content` is now exported**, not dropped — this supersedes the
+  request in my section above, which asked for a new `Attachment` field. There is no URL on an
+  `attachments[]` entry, so that text is the only copy of the document; it is appended to the
+  message as `**Attachment: name**` plus a fenced block (language inferred from the extension)
+  and merges into the user's own turn. **No change to the shared `Attachment` typedef is needed
+  any more — please ignore that earlier request.**
+- **`files[]` entries with no URL keep `url: null`.** The exact live shape
+  (`success, path, file_kind, file_uuid, file_name, created_at, size_bytes, uuid`) has no URL at
+  all, so nothing fabricates a dead link. Tested.
+- **Round-number message counts warn.** No pagination was observed (largest sample: 48 messages),
+  but an array of exactly 20/25/50/100/200/500/1000 is the shape a silent limit would take, so
+  that now produces a warning rather than a silent truncation.
+- Warnings are de-duplicated, so a problem affecting 40 messages produces one line, not 40.
+- **Markdown fidelity is now asserted, not assumed.** Rivals lose users on mangled LaTeX,
+  broken tables and footnote wreckage. A test round-trips a message containing inline and
+  display math, an aligned table with math and code in its cells, three-deep nested lists, a
+  footnote reference plus its definition, and a block quote with a link, and asserts the output
+  is **byte-identical** to the source. Another asserts artifact code survives unescaped with no
+  HTML entities. The API path never touches `html2md`, so this is structural, not luck.
+
+Still UNVERIFIED, in order of how much it would hurt:
+
+1. **`tool_use` / `tool_result` block shape.** They did not occur in the 235 sampled blocks. My
+   handling comes from open-source exporters and the artifacts system prompt, not from a
+   measured payload. Artifact folding (`create` → `update(old_str/new_str)` → `rewrite`, keyed
+   on `input.id`) is the most intricate untested-against-reality code I own. **A conversation
+   containing an artifact that was edited at least once is the single most valuable manual test
+   anyone can run against this extension.**
+2. **`attachments[]` / `files[]` URL fields.** `preview_url` / `preview_asset.url` /
+   `document_asset.url` are probed because different builds report different spellings, but only
+   the no-URL shape has been seen live. Attachment links are the least-tested output.
+3. **No live request has ever been made from this machine.** Driving the user's signed-in
+   account was out of scope for an unattended agent, so every network test uses an injected
+   `fetch`. The plumbing is tested; the live response is not.
+4. **Pagination.** Assumed absent based on a 48-message maximum. The round-number warning is the
+   only guard.
+5. **DOM fallback selectors.** Corrected against a 2026 live inventory (no
+   `data-testid="assistant-message"`; `.font-claude-message` dead; `.font-claude-response` live;
+   `.standard-markdown` / `.progressive-markdown` bodies) but not re-checked since. Claude has no
+   reliable DOM hook for the thinking block, and React artifacts render in a cross-origin
+   `claudeusercontent.com` iframe an extension cannot read at all — if the API path ever breaks,
+   artifacts are simply lost.
+
+One open request for whoever owns the shell (this replaces nothing above, it is new):
+
+- **Permissions.** The best competing extension ships two permissions — the `claude.ai` host
+  permission and `storage` — with no `activeTab`, no `downloads` and no `tabs`, by writing the
+  file through an in-page blob anchor instead of `chrome.downloads`. My manifest mirrors Agent
+  B's shell as it stands today (`downloads`, `activeTab`, `scripting`, `storage`). If the shared
+  background worker moves off `chrome.downloads`, tell me and I will drop `downloads` and
+  `activeTab` from `extensions/claude/manifest.json`. I did not change the shell myself.
