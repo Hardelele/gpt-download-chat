@@ -129,7 +129,10 @@ export function nodeToMessage(node) {
   const rawRole = String(author.role || '').toLowerCase();
   const role = ROLE_MAP[rawRole] || (rawRole === 'critic' ? 'system' : 'assistant');
 
-  const { text, contentType, attachments } = renderContent(msg.content, msg);
+  const rendered = renderContent(msg.content, msg);
+  const { contentType, attachments } = rendered;
+  // Code is kept byte-exact; prose gets the invisible citation junk stripped.
+  const text = contentType === 'code' ? rendered.text : sanitizeText(rendered.text);
 
   // Hidden = plumbing the renderer skips by default. We never drop nodes; the
   // renderer decides what to show.
@@ -151,6 +154,21 @@ export function nodeToMessage(node) {
     attachments,
     hidden: Boolean(hidden),
   };
+}
+
+/**
+ * ChatGPT wraps search citations in private-use-area control characters
+ * (U+E200–U+E20F and friends) that render as tofu boxes in a text editor, and
+ * sprinkles zero-width joiners into streamed text. Strip both; keep everything
+ * else byte-for-byte.
+ * @param {string} text
+ */
+export function sanitizeText(text) {
+  if (!text || typeof text !== 'string') return '';
+  return text
+    .replace(/[\uE000-\uF8FF]/g, '')             // private-use area (citation markers)
+    .replace(/[\u200B-\u200D\u2060\uFEFF]/g, '')  // zero-width joiners / BOM
+    .replace(/\u00A0/g, ' ');                   // non-breaking space to plain space
 }
 
 function numberOrNull(v) {

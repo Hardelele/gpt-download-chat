@@ -11,6 +11,7 @@
  */
 
 import { htmlToMarkdown } from './html2md.js';
+import { sanitizeText } from './api-client.js';
 
 export const TURN_SELECTORS = [
   'article[data-testid^="conversation-turn-"]',
@@ -98,7 +99,7 @@ export function turnToMessage(turn) {
   if (!turn) return null;
   const role = roleOf(turn);
   const body = bodyOf(turn);
-  const text = htmlToMarkdown(body).trim();
+  const text = sanitizeText(htmlToMarkdown(body)).trim();
   const attachments = qa(body, 'img')
     .map((img) => ({
       type: 'image',
