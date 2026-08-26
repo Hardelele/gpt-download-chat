@@ -261,6 +261,9 @@ function ancestorsOf(node) {
 
 function commonAncestor(nodes) {
   if (!nodes.length) return null;
+  // A single node is its own ancestor chain; the useful answer is its parent, so that
+  // a one-turn thread still segments into [question block, ...answer blocks].
+  if (nodes.length === 1) return nodes[0].parent || null;
   let path = ancestorsOf(nodes[0]);
   for (let i = 1; i < nodes.length; i += 1) {
     const other = ancestorsOf(nodes[i]);
@@ -389,7 +392,9 @@ export function parseCitationComments(comments, uuids) {
       for (;;) {
         const idx = text.indexOf(uuid, from);
         if (idx === -1) break;
-        marks.push({ uuid, at: idx + uuid.length });
+        let at = idx + uuid.length;
+        if (text[at] === '"' || text[at] === "'") at += 1; // step over the uuid's closing quote
+        marks.push({ uuid, at });
         from = idx + uuid.length;
       }
     }
@@ -426,6 +431,8 @@ function extractUrlAndTitle(slice) {
     if (/^[0-9a-f-]{16,}$/i.test(candidate)) continue;     // another uuid
     if (/^[A-Za-z0-9_-]{20,}$/.test(candidate) && !/\s/.test(candidate)) continue; // opaque token
     if (!/[A-Za-zЀ-ӿ]/.test(candidate)) continue; // pure punctuation/numbers
+    // JSON scaffolding that leaked into the slice, e.g. `,null,` between array members
+    if (/^[\s,[\]{}]*(?:null|true|false)[\s,[\]{}]*$/i.test(candidate)) continue;
     title = candidate;
     break;
   }
@@ -504,6 +511,12 @@ function isNoiseElement(el) {
 /* 5. Turning one answer subtree into Markdown + a Sources block       */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Citation pills are rendered with the bracketed number *as the link label*, so the
+ * Markdown reads `...instead of making it.[[1]](https://…)`. CommonMark allows the
+ * balanced inner brackets, and the reader sees the familiar `[1]` marker rather than a
+ * bare digit glued to the preceding word.
+ */
 function makeAnchor(href, label) {
   const a = new SnapElement('a', Object.create(null));
   a.setAttribute('href', href);
