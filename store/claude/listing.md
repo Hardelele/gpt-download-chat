@@ -1,4 +1,4 @@
-# Chrome Web Store listing — Chat2MD for Claude
+# Chrome Web Store listing — Chat2MD (claude.ai)
 
 Copy each block verbatim into the corresponding field of the Web Store developer
 dashboard (**Store listing** tab). Character counts are the store's hard limits.
@@ -11,23 +11,26 @@ dashboard (**Store listing** tab). Character counts are the store's hard limits.
 
 ## Item name
 
-*Limit 75 characters. Currently 43.*
+*Limit 75 characters. Currently 29.*
 
 ```
-Chat2MD for Claude — Save chats as Markdown
+Chat2MD — AI Chat to Markdown
 ```
 
 > Must match `extensions/claude/manifest.json` → `name`. It does.
 > If one changes, change both, or `scripts/verify.mjs` will fail the build.
+>
+> **Do not put "Claude" in this field.** See the trademark note below — the item
+> name has to be mark-free, and compatibility is stated in the description instead.
 
 ---
 
 ## Short description (summary)
 
-*Limit 132 characters. Currently 123. Shown in search results and on the tile.*
+*Limit 132 characters. Currently 126. Shown in search results and on the tile.*
 
 ```
-Export any Claude conversation to a clean Markdown file. Code, artifacts and tables survive. Runs entirely on your machine.
+Works with claude.ai. Save a conversation as a clean Markdown file — code, artifacts and tables survive. Runs on your machine.
 ```
 
 > Must match `extensions/claude/manifest.json` → `description`. The store pulls this field
@@ -53,17 +56,17 @@ English (United States)
 no HTML. Paste exactly as below.*
 
 ```
-Chat2MD saves a Claude conversation to a Markdown file, in one click, with the formatting and the artifacts intact.
+Chat2MD works with claude.ai. It saves the conversation you are reading to a Markdown file, in one click, with the formatting and the artifacts intact.
 
 WHY IT EXISTS
 
-Claude has no way to download the conversation you are looking at.
+There is no way to download a single conversation from claude.ai.
 
 There is a Share button, which publishes a public link rather than giving you a file. And there is an account-wide data export buried in Settings, which is a different thing entirely: you request it under Settings > Privacy > Export data, you wait, and a download link arrives by email covering every conversation on your account at once. If what you wanted was this one thread, as Markdown, in your notes folder, neither of those helps.
 
 The obvious workaround does not work either. Selecting a long Claude thread and pressing Ctrl+C loses material, because the interface only keeps part of a long conversation in the page at any moment. And whatever you do capture arrives flattened: code fences lose their language tag, tables collapse into runs of text, nested lists lose their indentation.
 
-Artifacts make it worse. The document, the script or the component Claude built for you lives in a side panel, outside the transcript. Copy the chat and the artifact is simply not in it — which is usually the single most valuable thing in the conversation.
+Artifacts make it worse. The document, the script or the component built for you lives in a side panel, outside the transcript. Copy the chat and the artifact is simply not in it — which is usually the single most valuable thing in the conversation. Chat2MD folds every revision of an artifact back into its final version and drops it into the file, in place, as a fenced code block.
 
 WHAT YOU GET
 
@@ -94,7 +97,11 @@ Chat2MD has no server, because it does not need one. The conversion happens insi
 • The extension makes no network requests to the developer or to any third party. It reads from claude.ai only, using the session you are already signed in to.
 • No remote code: every line of JavaScript ships inside the package and can be read before you install it.
 
-Chat2MD for Claude requests access to claude.ai and to no other website.
+Chat2MD requests access to claude.ai and to no other website.
+
+TRADEMARKS
+
+Chat2MD is an independent, unofficial tool. Claude is a trademark of Anthropic, PBC. This extension is not affiliated with, endorsed by, or sponsored by Anthropic.
 
 OPEN SOURCE
 
@@ -107,7 +114,6 @@ PRICING
 
 Free. No paid tier, no trial, no upsell.
 
-Chat2MD is an independent project. It is not affiliated with, endorsed by, or sponsored by Anthropic.
 ```
 
 *Word count: ~470. Benefit-led, no emoji, no keyword stuffing.*
@@ -149,10 +155,27 @@ reconstruction, optional thinking and tool traffic, and a filename you can live 
 copy then has to lead with those instead of with the gap. **Re-check the help article before
 each store submission.**
 
-Do not describe the extension as "official", "by Anthropic", or "Claude Export". The name in
-the manifest is deliberately `Chat2MD for Claude`: "for X" is the phrasing Chrome Web Store
-review accepts for third-party companions, and the disclaimer line at the end of the detailed
-description is there for the same reason.
+## Trademark constraint — read before renaming anything
+
+CLAUDE is a **registered trademark** of Anthropic, PBC (Reg. 7645254), and Anthropic publishes
+**no nominative-use carve-out**. Their guidance allows stating compatibility in plain text, but
+**not** using the mark as part of a product name. So:
+
+- The item name and `manifest.json` → `name` are deliberately **mark-free**:
+  `Chat2MD — AI Chat to Markdown`. Do not "improve" this to `Chat2MD for Claude`,
+  `Claude2MD`, `Claude Exporter` or anything similar. An earlier draft of this file used
+  `Chat2MD for Claude`; it was changed for exactly this reason.
+- Compatibility lives in the **description body** ("Works with claude.ai"), where a factual
+  statement of interoperability is what the guidance permits.
+- The TRADEMARKS paragraph in the detailed description is required, not decorative. Keep it.
+- Never describe the extension as "official", "by Anthropic", or "Anthropic's".
+- Prefer writing **claude.ai** (the site you interoperate with) over **Claude** (the mark)
+  wherever the sentence still reads naturally.
+
+Related terms-of-service point, which the code already honours: **never read, log or store a
+session token.** The extractor uses a same-origin `fetch` with `credentials:'include'`, so the
+browser attaches the cookie itself and no extension code ever sees its value. Do not add
+anything that reads `sessionKey`.
 
 ---
 
@@ -190,7 +213,15 @@ The dashboard asks for a sentence per permission. These match
 | `storage` | Used to remember the user's own export preferences (front matter, timestamps, whether to include thinking and tool calls) between uses. Nothing else is stored, and nothing leaves the browser. |
 | `https://claude.ai/*` | The extension reads the open conversation from claude.ai using the user's existing signed-in session. It is the only host the extension contacts. |
 
-**Single purpose statement:** "Export the Claude conversation the user is currently viewing
+> **Permission-reduction opportunity (for Agent B / the orchestrator, not for this file to
+> decide).** The strongest competing extension ships with only two permissions — the
+> `claude.ai` host permission and `storage` — no `activeTab`, no `downloads`, no `tabs`,
+> by saving through an in-page blob anchor instead of `chrome.downloads`. Reviewers and
+> privacy-minded users both notice the difference. The permission list above mirrors the
+> shared popup/background worker as they are written today; if that shell drops
+> `chrome.downloads`, drop `downloads` and `activeTab` here too.
+
+**Single purpose statement:** "Export the claude.ai conversation the user is currently viewing
 to a Markdown file on their own computer."
 
 **Remote code:** No. All code is contained in the package.
@@ -218,6 +249,6 @@ At least one screenshot is mandatory; up to five are allowed. Screenshots must b
 
 Burned into the screenshot images themselves (the store does not render separate captions):
 
-1. *"Claude cannot download one chat. This can."*
+1. *"claude.ai cannot download one chat. This can."*
 2. *"Artifacts land in the file, in place, with their language."*
 3. *"The whole thread — including the branch you actually kept."*
