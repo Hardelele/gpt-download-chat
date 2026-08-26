@@ -5,8 +5,8 @@ import {
   toMarkdown,
   DEFAULT_OPTIONS,
   EXPORTER_VERSION,
-} from '../extension/src/lib/markdown.js';
-import { buildFilename, slugify } from '../extension/src/lib/filename.js';
+} from '../shared/lib/markdown.js';
+import { buildFilename, slugify } from '../shared/lib/filename.js';
 
 const NOW = '2026-08-26T12:00:00Z';
 
@@ -482,7 +482,7 @@ test('slugify: collapses whitespace and repeated separators', () => {
  * ------------------------------------------------------------------ */
 
 test('toDataUrl round-trips Cyrillic, CJK and emoji', async () => {
-  const { toDataUrl } = await import('../extension/src/background.js');
+  const { toDataUrl } = await import('../shared/background.js');
   const text = '# Привет\n\n中文 — emoji 🎉 — ok\n';
   const url = toDataUrl(text);
   assert.match(url, /^data:text\/markdown;charset=utf-8;base64,/);
@@ -491,14 +491,14 @@ test('toDataUrl round-trips Cyrillic, CJK and emoji', async () => {
 });
 
 test('toDataUrl handles a payload larger than one encoding chunk', async () => {
-  const { toDataUrl } = await import('../extension/src/background.js');
+  const { toDataUrl } = await import('../shared/background.js');
   const text = 'ё'.repeat(100000);
   const b64 = toDataUrl(text).split(',')[1];
   assert.equal(Buffer.from(b64, 'base64').toString('utf8'), text);
 });
 
 test('service worker download handler renders, names and downloads', async (t) => {
-  const { handleMessage } = await import('../extension/src/background.js');
+  const { handleMessage } = await import('../shared/background.js');
   let captured = null;
   globalThis.chrome = {
     downloads: {
@@ -533,7 +533,7 @@ test('service worker download handler renders, names and downloads', async (t) =
 });
 
 test('service worker ignores messages that are not its own', async () => {
-  const { handleMessage } = await import('../extension/src/background.js');
+  const { handleMessage } = await import('../shared/background.js');
   assert.equal(handleMessage({ type: 'chat2md:extract' }, null, () => {}), undefined);
   assert.equal(handleMessage(null, null, () => {}), undefined);
 });

@@ -3,11 +3,11 @@
  * make-screenshots.mjs — Chrome Web Store screenshots at exactly 1280x800.
  *
  * Nothing here is a mock-up of the product:
- *   - the popup panel is the real extension/src/popup/popup.html markup,
- *     styled by the real extension/src/popup/popup.css;
+ *   - the popup panel is the real shared/popup/popup.html markup,
+ *     styled by the real shared/popup/popup.css;
  *   - the Markdown shown in shot 2 is the real output of
- *     extension/src/lib/markdown.js, and the filename is the real output of
- *     extension/src/lib/filename.js.
+ *     shared/lib/markdown.js, and the filename is the real output of
+ *     shared/lib/filename.js.
  * Only the sample conversation is fabricated, and it is obviously a sample.
  *
  *   node scripts/make-screenshots.mjs
@@ -22,7 +22,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const POPUP = join(ROOT, 'extension', 'src', 'popup');
+const POPUP = join(ROOT, 'shared', 'popup');
 const OUT = join(ROOT, 'store', 'assets');
 const SRC = join(OUT, 'src');
 mkdirSync(SRC, { recursive: true });
@@ -35,10 +35,10 @@ const esc = (s) =>
 /* ---------------------------------------------------------------- */
 
 const { toMarkdown } = await import(
-  pathToFileURL(join(ROOT, 'extension', 'src', 'lib', 'markdown.js')).href
+  pathToFileURL(join(ROOT, 'shared', 'lib', 'markdown.js')).href
 );
 const { buildFilename } = await import(
-  pathToFileURL(join(ROOT, 'extension', 'src', 'lib', 'filename.js')).href
+  pathToFileURL(join(ROOT, 'shared', 'lib', 'filename.js')).href
 );
 
 const sample = {
