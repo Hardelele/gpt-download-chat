@@ -213,7 +213,17 @@ export function renderContent(content, message) {
       return { text: (header + fence(body, lang)).trim(), contentType: 'code', attachments };
     }
 
-    case 'execution_output':
+    // Result of a code / tool run. Observed live on every conversation that used
+    // python, web.run or container.exec. Render it as a plain fenced block; the
+    // role ('tool') and the hidden flag decide whether the renderer shows it.
+    case 'execution_output': {
+      const body = typeof content.text === 'string' ? content.text
+        : typeof content.result === 'string' ? content.result
+          : stringifyUnknown(content);
+      if (!String(body).trim()) return { text: '', contentType: 'other', attachments };
+      return { text: fence(body, ''), contentType: 'code', attachments };
+    }
+
     case 'tether_quote':
     case 'tether_browsing_display':
     case 'system_error': {
@@ -221,7 +231,7 @@ export function renderContent(content, message) {
         : typeof content.result === 'string' ? content.result
           : stringifyUnknown(content);
       if (!String(body).trim()) return { text: '', contentType: 'other', attachments };
-      return { text: fence(body, type === 'execution_output' ? '' : ''), contentType: 'other', attachments };
+      return { text: fence(body, ''), contentType: 'other', attachments };
     }
 
     case 'thoughts':
@@ -371,8 +381,12 @@ export function mapConversationPayload(payload, opts = {}) {
     );
   }
 
-  // model = model_slug of the last assistant message that carries one.
-  let model = null;
+  // The conversation object carries `default_model_slug` (observed live, e.g.
+  // "gpt-5-6-thinking"); it is the authoritative answer. The per-message
+  // `metadata.model_slug` scan is the fallback for older payloads.
+  let model = typeof data.default_model_slug === 'string' && data.default_model_slug.trim()
+    ? data.default_model_slug.trim()
+    : null;
   for (let i = branch.length - 1; i >= 0 && !model; i--) {
     const m = branch[i].message;
     const slug = m && m.metadata && m.metadata.model_slug;
@@ -494,16 +508,79 @@ export async function getAccessToken(opts = {}) {
 }
 
 /**
+ * Pick the workspace account id out of /backend-api/accounts/check/v4-2023-04-27.
+ * Team / Enterprise workspaces need it on the conversation call; personal
+ * accounts ignore it. Prefers a non-personal workspace when the user has both.
+ * @param {object} payload
+ * @returns {string|null}
+ */
+export function pickAccountId(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+  const accounts = payload.accounts && typeof payload.accounts === 'object' ? payload.accounts : null;
+  if (!accounts) return null;
+  const ordering = Array.isArray(payload.account_ordering) ? payload.account_ordering : [];
+  const keys = ordering.concat(Object.keys(accounts).filter((k) => !ordering.includes(k)));
+  let personal = null;
+  for (const key of keys) {
+    const entry = accounts[key];
+    const account = (entry && (entry.account || entry)) || null;
+    const id = account && (account.account_id || account.id);
+    if (!id) continue;
+    const structure = String((account && account.structure) || '').toLowerCase();
+    const isPersonal = key === 'default' || structure === 'personal';
+    if (!isPersonal) return String(id);
+    if (!personal) personal = String(id);
+  }
+  return personal;
+}
+
+/**
+ * @param {{fetch?:Function, location?:{origin:string}, token?:string|null}} [opts]
+ * @returns {Promise<string|null>} account id, or null (never throws)
+ */
+export async function getAccountId(opts = {}) {
+  try {
+    const fetchImpl = fetchImplOf(opts);
+    const origin = currentLocation(opts).origin || 'https://chatgpt.com';
+    const res = await fetchImpl(`${origin}/backend-api/accounts/check/v4-2023-04-27`, {
+      credentials: 'include',
+      headers: authHeaders(opts.token),
+    });
+    if (!res || !res.ok) return null;
+    return pickAccountId(await res.json());
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Header set for backend-api calls. Cookies alone are accepted today (verified
+ * live), so the token is strictly an upgrade — never a precondition. Both
+ * `Authorization` and `X-Authorization` are sent because ChatGPT's own edge has
+ * accepted either at different times.
+ * @param {string|null|undefined} token
+ * @param {string|null|undefined} accountId
+ */
+export function authHeaders(token, accountId) {
+  const headers = { accept: 'application/json' };
+  if (token) {
+    headers.authorization = `Bearer ${token}`;
+    headers['x-authorization'] = `Bearer ${token}`;
+  }
+  if (accountId) headers['chatgpt-account-id'] = String(accountId);
+  return headers;
+}
+
+/**
  * @param {string} conversationId
  * @param {string|null} token
- * @param {{fetch?:Function, location?:{origin:string}}} [opts]
+ * @param {{fetch?:Function, location?:{origin:string}, accountId?:string|null}} [opts]
  * @returns {Promise<object>} raw conversation payload
  */
 export async function fetchConversation(conversationId, token, opts = {}) {
   const fetchImpl = fetchImplOf(opts);
   const origin = currentLocation(opts).origin || 'https://chatgpt.com';
-  const headers = { accept: 'application/json' };
-  if (token) headers.authorization = `Bearer ${token}`;
+  const headers = authHeaders(token, opts.accountId);
   const res = await fetchImpl(
     `${origin}/backend-api/conversation/${encodeURIComponent(conversationId)}`,
     { credentials: 'include', headers },
@@ -530,20 +607,32 @@ export async function extractViaApi(opts = {}) {
   if (!conversationId) throw new Error('No conversation id in URL');
   if (isShareUrl(sourceUrl)) throw new Error('Shared link: backend API is not available');
 
+  // A missing token is NOT a failure: cookies alone are accepted by
+  // /backend-api today, so we always attempt the call. Bailing to the DOM here
+  // would throw away a working request.
   let token = null;
   try {
     token = await getAccessToken(opts);
   } catch {
     token = null;
   }
-  const payload = await fetchConversation(conversationId, token, opts);
+
+  // Workspace id — only Team/Enterprise users need it, and the probe is allowed
+  // to fail silently.
+  const accountId = opts.accountId !== undefined
+    ? opts.accountId
+    : await getAccountId({ ...opts, token });
+
+  const payload = await fetchConversation(conversationId, token, { ...opts, accountId });
   const conversation = mapConversationPayload(payload, {
     sourceUrl,
     conversationId,
     extractedVia: 'api',
   });
   if (!token) {
-    conversation.warnings.push('No access token from /api/auth/session; used session cookies only.');
+    conversation.warnings.push(
+      'No access token from /api/auth/session — the conversation was fetched with session cookies only.',
+    );
   }
   return conversation;
 }

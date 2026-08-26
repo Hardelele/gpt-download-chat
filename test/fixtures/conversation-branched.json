@@ -6,7 +6,7 @@
   "current_node": "n-a2",
   "moderation_results": [],
   "is_archived": false,
-  "default_model_slug": "gpt-4o",
+  "default_model_slug": "gpt-5-6-thinking",
   "mapping": {
     "n-root": {
       "id": "n-root",
@@ -60,7 +60,7 @@
         "end_turn": true,
         "weight": 1,
         "recipient": "all",
-        "metadata": { "model_slug": "gpt-3.5-turbo" }
+        "metadata": { "model_slug": "gpt-5-4-auto-thinking" }
       },
       "parent": "n-u1",
       "children": []
@@ -82,7 +82,7 @@
         "end_turn": false,
         "weight": 1,
         "recipient": "all",
-        "metadata": { "model_slug": "gpt-4o", "is_visually_hidden_from_conversation": false }
+        "metadata": { "model_slug": "gpt-5-4-thinking", "is_visually_hidden_from_conversation": false }
       },
       "parent": "n-u1",
       "children": ["n-a1"]
@@ -101,7 +101,7 @@
         "end_turn": true,
         "weight": 1,
         "recipient": "all",
-        "metadata": { "model_slug": "gpt-4o" }
+        "metadata": { "model_slug": "gpt-5-4-thinking" }
       },
       "parent": "n-think",
       "children": ["n-u2", "n-orphan-branch"]
@@ -155,7 +155,7 @@
         "end_turn": false,
         "weight": 1,
         "recipient": "python",
-        "metadata": { "model_slug": "gpt-4o" }
+        "metadata": { "model_slug": "gpt-5-4-thinking" }
       },
       "parent": "n-u2",
       "children": ["n-tool"]
@@ -190,7 +190,7 @@
         "end_turn": true,
         "weight": 1,
         "recipient": "all",
-        "metadata": { "model_slug": "gpt-4o", "finish_details": { "type": "stop" } }
+        "metadata": { "model_slug": "gpt-5-4-thinking", "finish_details": { "type": "stop" } }
       },
       "parent": "n-tool",
       "children": []

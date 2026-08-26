@@ -13,6 +13,9 @@ import {
   mapConversationPayload,
   extractViaApi,
   getAccessToken,
+  getAccountId,
+  pickAccountId,
+  authHeaders,
   findEmbeddedPayload,
 } from '../extension/src/lib/api-client.js';
 import { extractConversation, normalizeConversation } from '../extension/src/lib/extract.js';
@@ -211,7 +214,7 @@ test('mapConversationPayload produces the contract Conversation', () => {
   assert.equal(conv.updateTime, PAYLOAD.update_time);
   assert.equal(conv.extractedVia, 'api');
   assert.equal(conv.sourceUrl, 'https://chatgpt.com/c/x');
-  assert.equal(conv.model, 'gpt-4o', 'model comes from the last assistant message that has a slug');
+  assert.equal(conv.model, 'gpt-5-6-thinking', 'model comes from the conversation default_model_slug');
 
   assert.deepEqual(
     conv.messages.map((m) => m.id),
@@ -374,7 +377,7 @@ test('extractConversation prefers the API path', async () => {
     waitMs: 0,
   });
   assert.equal(conv.extractedVia, 'api');
-  assert.equal(conv.model, 'gpt-4o');
+  assert.equal(conv.model, 'gpt-5-6-thinking');
   assert.equal(conv.messages.filter((m) => !m.hidden).length, 6);
 });
 
@@ -434,7 +437,7 @@ test('a /share/ page with embedded JSON keeps full fidelity instead of scraping'
     maxIterations: 2,
   });
   assert.equal(conv.extractedVia, 'api');
-  assert.equal(conv.model, 'gpt-4o');
+  assert.equal(conv.model, 'gpt-5-6-thinking');
   assert.equal(conv.createTime, PAYLOAD.create_time);
   assert.equal(conv.messages.length, 8);
   assert.ok(conv.warnings.some((w) => /embedded in the page/.test(w)));
@@ -466,4 +469,189 @@ test('normalizeConversation repairs a malformed conversation', () => {
   assert.equal(fixed.messages[0].text, '');
   assert.deepEqual(fixed.messages[0].attachments, []);
   assert.equal(fixed.messages[0].hidden, false);
+});
+
+/* ------------------------------------------------------------------ */
+/* Live-verified deltas (coordinator ran these against chatgpt.com)    */
+/* ------------------------------------------------------------------ */
+
+test('model comes from default_model_slug, falling back to the last assistant slug', () => {
+  assert.equal(mapConversationPayload(PAYLOAD, {}).model, 'gpt-5-6-thinking');
+
+  const noDefault = clone(PAYLOAD);
+  delete noDefault.default_model_slug;
+  assert.equal(mapConversationPayload(noDefault, {}).model, 'gpt-5-4-thinking');
+
+  const blankDefault = clone(PAYLOAD);
+  blankDefault.default_model_slug = '   ';
+  assert.equal(mapConversationPayload(blankDefault, {}).model, 'gpt-5-4-thinking');
+
+  const nothing = clone(PAYLOAD);
+  delete nothing.default_model_slug;
+  for (const id of Object.keys(nothing.mapping)) {
+    const m = nothing.mapping[id].message;
+    if (m && m.metadata) delete m.metadata.model_slug;
+  }
+  assert.equal(mapConversationPayload(nothing, {}).model, null);
+});
+
+test('execution_output renders as a plain fenced block, not as dumped JSON', () => {
+  const msg = nodeToMessage(PAYLOAD.mapping['n-tool']);
+  assert.equal(msg.contentType, 'code', 'not "other"');
+  assert.equal(msg.role, 'tool');
+  assert.equal(msg.authorName, 'python');
+  assert.equal(msg.text, '```\n0.0041231\n```');
+  assert.ok(!/content_type|"text":/.test(msg.text), 'the raw JSON envelope must not leak');
+});
+
+test('an empty execution_output collapses instead of emitting an empty fence', () => {
+  const msg = nodeToMessage({
+    id: 'x',
+    message: {
+      id: 'x',
+      author: { role: 'tool', name: 'container.exec' },
+      content: { content_type: 'execution_output', text: '   ' },
+      metadata: {},
+    },
+  });
+  assert.equal(msg.text, '');
+  assert.equal(msg.hidden, true, 'nothing to show, so the renderer skips it');
+});
+
+test('an opaque recipient hash is labelled verbatim, not matched against an enum', () => {
+  for (const recipient of ['python', 'web.run', 'container.exec', 't2uay3k.sj1i4kz']) {
+    const msg = nodeToMessage({
+      id: 'c',
+      message: {
+        id: 'c',
+        author: { role: 'assistant' },
+        recipient,
+        channel: 'analysis',
+        content: { content_type: 'code', language: 'json', text: '{"q": 1}' },
+        metadata: {},
+      },
+    });
+    assert.ok(msg.text.includes('tool call \u2192 `' + recipient + '`'), recipient);
+    assert.ok(msg.text.includes('```json'));
+  }
+});
+
+test('thoughts and reasoning_recap keep their text intact', () => {
+  const recap = nodeToMessage({
+    id: 'r',
+    message: {
+      id: 'r',
+      author: { role: 'assistant' },
+      content: { content_type: 'reasoning_recap', content: 'Considered three approaches, picked slicing.' },
+      metadata: { model_slug: 'gpt-5-6-thinking' },
+    },
+  });
+  assert.equal(recap.contentType, 'thoughts');
+  assert.equal(recap.text, 'Considered three approaches, picked slicing.');
+  assert.equal(recap.hidden, false, 'the renderer gates thoughts by contentType, not by hidden');
+});
+
+test('authHeaders sends Authorization AND X-Authorization, plus the account id', () => {
+  assert.deepEqual(authHeaders('tok', 'acc-1'), {
+    accept: 'application/json',
+    authorization: 'Bearer tok',
+    'x-authorization': 'Bearer tok',
+    'chatgpt-account-id': 'acc-1',
+  });
+  assert.deepEqual(authHeaders(null, null), { accept: 'application/json' });
+  assert.deepEqual(authHeaders(undefined), { accept: 'application/json' });
+});
+
+test('pickAccountId prefers a workspace account over the personal one', () => {
+  assert.equal(pickAccountId({
+    accounts: {
+      default: { account: { account_id: 'personal-1', structure: 'personal' } },
+      'ws-key': { account: { account_id: 'workspace-9', structure: 'workspace' } },
+    },
+    account_ordering: ['default', 'ws-key'],
+  }), 'workspace-9');
+
+  assert.equal(pickAccountId({
+    accounts: { default: { account: { account_id: 'personal-1', structure: 'personal' } } },
+    account_ordering: ['default'],
+  }), 'personal-1');
+
+  assert.equal(pickAccountId({}), null);
+  assert.equal(pickAccountId(null), null);
+  assert.equal(pickAccountId({ accounts: { a: {} } }), null);
+});
+
+test('getAccountId never throws, whatever the endpoint does', async () => {
+  assert.equal(await getAccountId({
+    fetch: fakeFetch([['/accounts/check/', () => json({
+      accounts: { default: { account: { account_id: 'acc-42', structure: 'personal' } } },
+      account_ordering: ['default'],
+    })]]),
+    location: { origin: 'https://chatgpt.com' },
+  }), 'acc-42');
+
+  assert.equal(await getAccountId({
+    fetch: fakeFetch([['/accounts/check/', () => json({}, 500)]]),
+    location: { origin: 'https://chatgpt.com' },
+  }), null);
+
+  assert.equal(await getAccountId({
+    fetch: async () => { throw new Error('network down'); },
+    location: { origin: 'https://chatgpt.com' },
+  }), null);
+});
+
+test('a missing access token does NOT abort the API path - cookies alone are enough', async () => {
+  const fetchImpl = fakeFetch([
+    ['/api/auth/session', () => json({ WARNING_BANNER: null, user: {}, expires: '2026-09-01' })],
+    ['/accounts/check/', () => json({}, 403)],
+    ['/backend-api/conversation/', () => json(PAYLOAD)],
+  ]);
+  const conv = await extractViaApi({
+    fetch: fetchImpl,
+    location: { origin: 'https://chatgpt.com', href: 'https://chatgpt.com/c/' + PAYLOAD.conversation_id },
+  });
+
+  assert.equal(conv.extractedVia, 'api');
+  assert.equal(conv.messages.length, 8, 'full transcript, no DOM fallback');
+  const call = fetchImpl.calls.find((c) => c.url.includes('/backend-api/conversation/'));
+  assert.ok(call, 'the conversation was still requested');
+  assert.equal(call.init.headers.authorization, undefined);
+  assert.equal(call.init.credentials, 'include', 'cookies carry the session');
+  assert.ok(conv.warnings.some((w) => /session cookies only/.test(w)));
+});
+
+test('the workspace account id rides along on the conversation call', async () => {
+  const fetchImpl = fakeFetch([
+    ['/api/auth/session', () => json({ accessToken: 'tok-xyz' })],
+    ['/accounts/check/v4-2023-04-27', () => json({
+      accounts: { biz: { account: { account_id: 'workspace-9', structure: 'workspace' } } },
+      account_ordering: ['biz'],
+    })],
+    ['/backend-api/conversation/', () => json(PAYLOAD)],
+  ]);
+  await extractViaApi({
+    fetch: fetchImpl,
+    location: { origin: 'https://chatgpt.com', href: 'https://chatgpt.com/c/' + PAYLOAD.conversation_id },
+  });
+
+  const call = fetchImpl.calls.find((c) => c.url.includes('/backend-api/conversation/'));
+  assert.equal(call.init.headers.authorization, 'Bearer tok-xyz');
+  assert.equal(call.init.headers['x-authorization'], 'Bearer tok-xyz');
+  assert.equal(call.init.headers['chatgpt-account-id'], 'workspace-9');
+});
+
+test('a personal account with no workspace still exports (no account header required)', async () => {
+  const fetchImpl = fakeFetch([
+    ['/api/auth/session', () => json({ accessToken: 'tok' })],
+    ['/accounts/check/', () => json({ accounts: {} })],
+    ['/backend-api/conversation/', () => json(PAYLOAD)],
+  ]);
+  const conv = await extractViaApi({
+    fetch: fetchImpl,
+    location: { origin: 'https://chatgpt.com', href: 'https://chatgpt.com/c/' + PAYLOAD.conversation_id },
+  });
+  assert.equal(conv.messages.length, 8);
+  const call = fetchImpl.calls.find((c) => c.url.includes('/backend-api/conversation/'));
+  assert.equal(call.init.headers['chatgpt-account-id'], undefined);
 });
