@@ -623,7 +623,22 @@ export async function extractViaApi(opts = {}) {
     ? opts.accountId
     : await getAccountId({ ...opts, token });
 
-  const payload = await fetchConversation(conversationId, token, { ...opts, accountId });
+  let payload;
+  const retryWarnings = [];
+  try {
+    payload = await fetchConversation(conversationId, token, { ...opts, accountId });
+  } catch (err) {
+    // An expired token or the wrong workspace id can 401/403/404 a request that
+    // plain cookies would have satisfied. Retry once with nothing but cookies.
+    const status = err && err.status;
+    const worthRetrying = (token || accountId) && (status === 401 || status === 403 || status === 404);
+    if (!worthRetrying) throw err;
+    payload = await fetchConversation(conversationId, null, { ...opts, accountId: null });
+    retryWarnings.push(
+      `The authenticated request failed with ${status}; the conversation was fetched with session cookies instead.`,
+    );
+  }
+
   const conversation = mapConversationPayload(payload, {
     sourceUrl,
     conversationId,
@@ -634,5 +649,6 @@ export async function extractViaApi(opts = {}) {
       'No access token from /api/auth/session — the conversation was fetched with session cookies only.',
     );
   }
+  conversation.warnings.push(...retryWarnings);
   return conversation;
 }

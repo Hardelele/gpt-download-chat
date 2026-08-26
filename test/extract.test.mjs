@@ -655,3 +655,58 @@ test('a personal account with no workspace still exports (no account header requ
   const call = fetchImpl.calls.find((c) => c.url.includes('/backend-api/conversation/'));
   assert.equal(call.init.headers['chatgpt-account-id'], undefined);
 });
+
+test('a stale token that 401s is retried with cookies only instead of falling back to the DOM', async () => {
+  let attempt = 0;
+  const fetchImpl = fakeFetch([
+    ['/api/auth/session', () => json({ accessToken: 'stale-token' })],
+    ['/accounts/check/', () => json({
+      accounts: { biz: { account: { account_id: 'workspace-9', structure: 'workspace' } } },
+      account_ordering: ['biz'],
+    })],
+    ['/backend-api/conversation/', (_url, init) => {
+      attempt += 1;
+      if (init.headers.authorization || init.headers['chatgpt-account-id']) return json({ detail: 'expired' }, 401);
+      return json(PAYLOAD);
+    }],
+  ]);
+
+  const conv = await extractViaApi({
+    fetch: fetchImpl,
+    location: { origin: 'https://chatgpt.com', href: 'https://chatgpt.com/c/' + PAYLOAD.conversation_id },
+  });
+
+  assert.equal(attempt, 2, 'exactly one retry');
+  assert.equal(conv.extractedVia, 'api');
+  assert.equal(conv.messages.length, 8);
+  assert.ok(conv.warnings.some((w) => /failed with 401/.test(w)));
+});
+
+test('a genuine failure is not retried forever and still surfaces to the caller', async () => {
+  let attempts = 0;
+  const fetchImpl = fakeFetch([
+    ['/api/auth/session', () => json({ accessToken: 'tok' })],
+    ['/accounts/check/', () => json({ accounts: {} })],
+    ['/backend-api/conversation/', () => { attempts += 1; return json({ detail: 'gone' }, 401); }],
+  ]);
+
+  await assert.rejects(() => extractViaApi({
+    fetch: fetchImpl,
+    location: { origin: 'https://chatgpt.com', href: 'https://chatgpt.com/c/' + PAYLOAD.conversation_id },
+  }), /401/);
+  assert.equal(attempts, 2, 'one attempt plus one retry, then it gives up');
+});
+
+test('a 500 is not retried - only auth-shaped failures are', async () => {
+  let attempts = 0;
+  const fetchImpl = fakeFetch([
+    ['/api/auth/session', () => json({ accessToken: 'tok' })],
+    ['/accounts/check/', () => json({ accounts: {} })],
+    ['/backend-api/conversation/', () => { attempts += 1; return json({ detail: 'boom' }, 500); }],
+  ]);
+  await assert.rejects(() => extractViaApi({
+    fetch: fetchImpl,
+    location: { origin: 'https://chatgpt.com', href: 'https://chatgpt.com/c/' + PAYLOAD.conversation_id },
+  }), /500/);
+  assert.equal(attempts, 1);
+});

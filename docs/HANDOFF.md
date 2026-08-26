@@ -530,3 +530,56 @@ and `extensions/gemini` report the identical 10, so this is the expected pre-hoi
 three per-platform items, not a defect in any one of them. It should go green the moment the
 orchestrator copies the shared shell in. Everything `verify.mjs` checks that *is* mine —
 manifest schema, MV3 version, description length, permission set, no remote code — passes.
+
+## Agent A — updated after the coordinator's LIVE run against chatgpt.com
+
+The coordinator exercised these paths in a logged-in browser. Their measurements confirmed the
+design (node keys are exactly `id, message, parent, children`; branching occurred in 2 of 6
+sampled conversations, largest mapping 68 nodes; 7 messages carried
+`is_visually_hidden_from_conversation`) and produced three deltas, all now fixed and tested.
+`test/extract.test.mjs` is 45 tests; `test/html2md.test.mjs` 17; all green.
+
+**Delta 1 — auth is looser than assumed (fixed).** Cookies alone return 200 from
+`/backend-api`, so the token is now an upgrade rather than a precondition: if
+`/api/auth/session` fails or carries no `accessToken`, the conversation call still goes out with
+`credentials:'include'` instead of bailing to the DOM. When a token *is* present it is sent as
+both `Authorization` and `X-Authorization` (matching what the pionxzh exporter ships).
+`Chatgpt-Account-Id` comes from `/backend-api/accounts/check/v4-2023-04-27` via
+`pickAccountId()`, which prefers a workspace account over the personal one and degrades silently
+on any failure — Team/Enterprise users need it, personal accounts are unaffected.
+I also added a **single bare-cookie retry** on 401/403/404: an expired token or a wrong workspace
+id otherwise sinks a request that plain cookies would have satisfied. 500s are not retried.
+
+**Delta 2 — `execution_output` (fixed).** It was landing in `'other'` and being dumped as fenced
+JSON. It now renders as a plain fenced block with `contentType:'code'`, role `tool`,
+`authorName` from `author.name`; visibility is left to the existing hidden/tool gating. Empty
+output collapses to `''` + `hidden:true` rather than emitting an empty fence.
+
+**Delta 3 — `default_model_slug` (fixed).** `Conversation.model` now reads the conversation-level
+`default_model_slug` first and falls back to the last assistant `metadata.model_slug`. Fixtures
+were re-slugged to current-generation names (`gpt-5-6-thinking`, `gpt-5-4-thinking`,
+`gpt-5-4-auto-thinking`) and there is **no pattern-matching on model names anywhere** in my code —
+slugs are treated as opaque strings.
+
+Also hardened from the observed context: `recipient` is treated as an arbitrary string
+(`python`, `web.run`, `container.exec` and opaque hashes like `t2uay3k.sj1i4kz` are all labelled
+verbatim — regression test covers all four); the `channel` field is ignored by design;
+`thoughts`/`reasoning_recap` carry their text through untouched with `contentType:'thoughts'`,
+so Agent B's `includeThoughts` toggle is all that stands between the user and a
+reasoning section.
+
+### Listing-worthy: shared links export at full fidelity
+
+Every rival extension scrapes the DOM, and truncated long-chat exports are their #1 complaint —
+our API-first path is the differentiator. **`/share/` links are the second one.** Competitors
+either fail on them or scrape them; `findEmbeddedPayload()` pulls the conversation JSON that the
+server inlines in a `<script>` tag on the share page, so a shared link exports with the same
+fidelity as your own chat: real timestamps, real model, correct active branch, no truncation.
+Agent C: worth a bullet in the store listing and the README ("works on shared links too").
+
+### Still unverified
+
+The **DOM fallback** remains the only untested-against-reality path — which now matters less,
+since Delta 1 removed most of the reasons we would ever reach it. `/backend-api/conversations?offset=&limit=`
+returning `{items, total, limit, offset}` is noted for a future bulk-export feature; I have not
+built against it.
