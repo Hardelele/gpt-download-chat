@@ -59,7 +59,7 @@ WHY IT EXISTS
 
 Claude has no way to download the conversation you are looking at.
 
-There is a Share button, which publishes a public link rather than giving you a file. There is an account-wide data export buried in Settings, which is a different thing entirely: you request it, you wait, an email arrives with a link to a .zip archive of every conversation you have ever had, and inside it is raw JSON that no human wants to read and no notes app knows what to do with. If what you wanted was this one thread, as Markdown, in your notes folder, neither of those helps.
+There is a Share button, which publishes a public link rather than giving you a file. And there is an account-wide data export buried in Settings, which is a different thing entirely: you request it under Settings > Privacy > Export data, you wait, and a download link arrives by email covering every conversation on your account at once. If what you wanted was this one thread, as Markdown, in your notes folder, neither of those helps.
 
 The obvious workaround does not work either. Selecting a long Claude thread and pressing Ctrl+C loses material, because the interface only keeps part of a long conversation in the page at any moment. And whatever you do capture arrives flattened: code fences lose their language tag, tables collapse into runs of text, nested lists lose their indentation.
 
@@ -117,20 +117,37 @@ Chat2MD is an independent project. It is not affiliated with, endorsed by, or sp
 ## Honesty notes for whoever maintains this copy
 
 The positioning above rests on one factual claim: **claude.ai offers no per-conversation
-export.** As of the version of claude.ai this was written against, the built-in options are
+export.** This was checked against Anthropic's own documentation, not against hearsay:
 
-1. **Share** — publishes a public snapshot link. Not a file, and it makes the chat readable
-   by anyone with the link.
-2. **Settings → Privacy → Export data** — an *account-wide* request. It is queued, it arrives
-   by email, and it produces a `.zip` of JSON covering every conversation on the account.
-3. Per-*artifact* download buttons and per-*code-block* copy buttons, which cover a fragment
-   of one message, not the thread.
+> **[Export your Claude data](https://support.claude.com/en/articles/9450526-export-your-claude-data)**
+> — Anthropic Help Center, last updated 8 July 2026.
+> (`support.anthropic.com` now redirects to `support.claude.com`.)
 
-If Anthropic ships a per-chat "Download as Markdown", the "WHY IT EXISTS" section becomes
-false advertising and must be rewritten the same day. The honest reposition is still strong —
-front matter, artifacts inlined in place, active-branch reconstruction, optional thinking and
-tool traffic, and a filename you can live with — but the copy has to lead with those instead
-of with the gap. Re-check before each store submission.
+That article documents exactly one export path: *initials (lower left) → Settings → Privacy →
+Export data*, after which **a download link arrives by email and expires after 24 hours**. It
+covers "conversation data and the user data for your account" — the whole account. It is web
+and Claude Desktop only. The article contains **no mention of exporting a single conversation,
+and no mention of Markdown, PDF or HTML**. The only sibling articles are "Export your
+organization's data" (also account-wide) and "Import and export your memory from Claude".
+
+Deliberate hedge in the copy above: the help article does **not** state the archive's file
+format. "A ZIP containing `conversations.json`" is repeated widely by third parties but is not
+an Anthropic-stated fact, so the listing says "a download link arrives by email" and stops
+there. Do not add the format back in.
+
+The other built-in options, for completeness — neither is an export of a conversation:
+
+1. **Share** — publishes a public snapshot link. Not a file, and it makes the chat readable by
+   anyone who has the link.
+2. Per-*artifact* download buttons and per-*code-block* copy buttons, which cover a fragment of
+   one message, not the thread.
+
+If Anthropic ships a per-chat "Download as Markdown", the "WHY IT EXISTS" section becomes false
+advertising and must be rewritten the same day. The honest reposition is still strong — front
+matter, artifacts folded to their final version and inlined in place, active-branch
+reconstruction, optional thinking and tool traffic, and a filename you can live with — but the
+copy then has to lead with those instead of with the gap. **Re-check the help article before
+each store submission.**
 
 Do not describe the extension as "official", "by Anthropic", or "Claude Export". The name in
 the manifest is deliberately `Chat2MD for Claude`: "for X" is the phrasing Chrome Web Store
