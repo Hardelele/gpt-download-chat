@@ -290,6 +290,13 @@ function stringifyUnknown(value) {
   }
 }
 
+/** True when the node is not explicitly flagged hidden and is not a system message. */
+function meta_isNotHidden(msg) {
+  const meta = (msg && msg.metadata) || {};
+  const role = String((msg && msg.author && msg.author.role) || '').toLowerCase();
+  return meta.is_visually_hidden_from_conversation !== true && role !== 'system';
+}
+
 /** Attachments declared in message.metadata.attachments (uploaded files). */
 function metadataAttachments(msg) {
   const meta = msg && msg.metadata;
@@ -324,13 +331,17 @@ export function mapConversationPayload(payload, opts = {}) {
   for (const node of branch) {
     const msg = nodeToMessage(node);
     if (!msg) continue;
-    const extra = metadataAttachments(node.message);
-    if (extra.length) {
-      msg.attachments = msg.attachments.concat(
-        extra.filter((e) => !msg.attachments.some((a) => a.url && a.url === e.url)),
-      );
-      if (msg.hidden && msg.text.trim()) msg.hidden = false;
+    for (const extra of metadataAttachments(node.message)) {
+      const existing = msg.attachments.find((a) => a.url && a.url === extra.url);
+      if (existing) {
+        // The metadata block carries the real filename; the content part carries the pointer.
+        if (extra.name) existing.name = extra.name;
+        if (!existing.alt && extra.name) existing.alt = extra.name;
+      } else {
+        msg.attachments.push(extra);
+      }
     }
+    if (msg.hidden && msg.attachments.length && meta_isNotHidden(node.message)) msg.hidden = false;
     messages.push(msg);
   }
 

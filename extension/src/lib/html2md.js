@@ -369,8 +369,13 @@ function renderList(node, ordered) {
   items.forEach((li, idx) => {
     const marker = ordered ? `${start + idx}. ` : '- ';
     const indent = ' '.repeat(marker.length);
-    let body = blocks(li).join('\n\n').trim();
-    if (!body) body = '';
+    // A nested list hugs its parent item; other blocks keep a blank line.
+    let body = '';
+    blocks(li).forEach((block, i) => {
+      if (i === 0) { body = block; return; }
+      body += (/^(?:[-*] |\d+\. )/.test(block) ? '\n' : '\n\n') + block;
+    });
+    body = body.trim();
     const lines = body.split('\n');
     const first = lines.shift() || '';
     const rest = lines.map((l) => (l.trim() ? indent + l : ''));
@@ -498,7 +503,7 @@ function blocks(node) {
     }
   }
   flush();
-  return out.filter((b) => b !== '' && !isUiNoise(b));
+  return out.filter((b) => b !== '');
 }
 
 /**

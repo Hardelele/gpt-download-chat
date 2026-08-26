@@ -1,0 +1,215 @@
+{
+  "title": "Reversing lists in Python",
+  "create_time": 1724600000.123,
+  "update_time": 1724603600.456,
+  "conversation_id": "1f0c2b3a-4d5e-6f70-8192-a3b4c5d6e7f8",
+  "current_node": "n-a2",
+  "moderation_results": [],
+  "is_archived": false,
+  "default_model_slug": "gpt-4o",
+  "mapping": {
+    "n-root": {
+      "id": "n-root",
+      "message": null,
+      "parent": null,
+      "children": ["n-sys"]
+    },
+    "n-sys": {
+      "id": "n-sys",
+      "message": {
+        "id": "n-sys",
+        "author": { "role": "system", "name": null, "metadata": {} },
+        "create_time": null,
+        "content": { "content_type": "text", "parts": ["You are ChatGPT, a large language model."] },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 0,
+        "recipient": "all",
+        "metadata": { "is_visually_hidden_from_conversation": true }
+      },
+      "parent": "n-root",
+      "children": ["n-u1"]
+    },
+    "n-u1": {
+      "id": "n-u1",
+      "message": {
+        "id": "n-u1",
+        "author": { "role": "user", "name": null, "metadata": {} },
+        "create_time": 1724600001.5,
+        "content": { "content_type": "text", "parts": ["How do I reverse a list in Python?"] },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1,
+        "recipient": "all",
+        "metadata": {}
+      },
+      "parent": "n-sys",
+      "children": ["n-a1-abandoned", "n-think"]
+    },
+    "n-a1-abandoned": {
+      "id": "n-a1-abandoned",
+      "message": {
+        "id": "n-a1-abandoned",
+        "author": { "role": "assistant", "name": null, "metadata": {} },
+        "create_time": 1724600002.0,
+        "content": {
+          "content_type": "text",
+          "parts": ["ABANDONED BRANCH: this regenerated answer must never appear in the export."]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1,
+        "recipient": "all",
+        "metadata": { "model_slug": "gpt-3.5-turbo" }
+      },
+      "parent": "n-u1",
+      "children": []
+    },
+    "n-think": {
+      "id": "n-think",
+      "message": {
+        "id": "n-think",
+        "author": { "role": "assistant", "name": null, "metadata": {} },
+        "create_time": 1724600003.0,
+        "content": {
+          "content_type": "thoughts",
+          "thoughts": [
+            { "summary": "Picking an approach", "content": "The user wants list reversal; mention reverse(), slicing and reversed()." }
+          ],
+          "source_analysis_msg_id": "n-a1"
+        },
+        "status": "finished_successfully",
+        "end_turn": false,
+        "weight": 1,
+        "recipient": "all",
+        "metadata": { "model_slug": "gpt-4o", "is_visually_hidden_from_conversation": false }
+      },
+      "parent": "n-u1",
+      "children": ["n-a1"]
+    },
+    "n-a1": {
+      "id": "n-a1",
+      "message": {
+        "id": "n-a1",
+        "author": { "role": "assistant", "name": null, "metadata": {} },
+        "create_time": 1724600004.25,
+        "content": {
+          "content_type": "text",
+          "parts": ["Three ways:\n\n1. `xs.reverse()` — in place.\n2. `xs[::-1]` — new list.\n3. `reversed(xs)` — lazy iterator."]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1,
+        "recipient": "all",
+        "metadata": { "model_slug": "gpt-4o" }
+      },
+      "parent": "n-think",
+      "children": ["n-u2", "n-orphan-branch"]
+    },
+    "n-u2": {
+      "id": "n-u2",
+      "message": {
+        "id": "n-u2",
+        "author": { "role": "user", "name": null, "metadata": {} },
+        "create_time": 1724600100.0,
+        "content": {
+          "content_type": "multimodal_text",
+          "parts": [
+            {
+              "content_type": "image_asset_pointer",
+              "asset_pointer": "file-service://file-ABC123",
+              "size_bytes": 51234,
+              "width": 800,
+              "height": 600,
+              "fovea": null,
+              "metadata": null
+            },
+            "Here is my benchmark chart — can you check the numbers?"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1,
+        "recipient": "all",
+        "metadata": {
+          "attachments": [
+            { "id": "file-ABC123", "name": "benchmark.png", "size": 51234, "mime_type": "image/png", "width": 800, "height": 600 }
+          ]
+        }
+      },
+      "parent": "n-a1",
+      "children": ["n-code"]
+    },
+    "n-code": {
+      "id": "n-code",
+      "message": {
+        "id": "n-code",
+        "author": { "role": "assistant", "name": null, "metadata": {} },
+        "create_time": 1724600101.0,
+        "content": {
+          "content_type": "code",
+          "language": "python",
+          "text": "import timeit\nprint(timeit.timeit('xs[::-1]', setup='xs=list(range(1000))'))"
+        },
+        "status": "finished_successfully",
+        "end_turn": false,
+        "weight": 1,
+        "recipient": "python",
+        "metadata": { "model_slug": "gpt-4o" }
+      },
+      "parent": "n-u2",
+      "children": ["n-tool"]
+    },
+    "n-tool": {
+      "id": "n-tool",
+      "message": {
+        "id": "n-tool",
+        "author": { "role": "tool", "name": "python", "metadata": {} },
+        "create_time": 1724600102.0,
+        "content": { "content_type": "execution_output", "text": "0.0041231" },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 0,
+        "recipient": "all",
+        "metadata": { "is_visually_hidden_from_conversation": true }
+      },
+      "parent": "n-code",
+      "children": ["n-a2"]
+    },
+    "n-a2": {
+      "id": "n-a2",
+      "message": {
+        "id": "n-a2",
+        "author": { "role": "assistant", "name": null, "metadata": {} },
+        "create_time": 1724600103.75,
+        "content": {
+          "content_type": "text",
+          "parts": ["Slicing runs in about **4.1 ms** per 1000 iterations:\n\n```python\nxs = xs[::-1]\n```\n\nYour chart matches."]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1,
+        "recipient": "all",
+        "metadata": { "model_slug": "gpt-4o", "finish_details": { "type": "stop" } }
+      },
+      "parent": "n-tool",
+      "children": []
+    },
+    "n-orphan-branch": {
+      "id": "n-orphan-branch",
+      "message": {
+        "id": "n-orphan-branch",
+        "author": { "role": "user", "name": null, "metadata": {} },
+        "create_time": 1724600200.0,
+        "content": { "content_type": "text", "parts": ["EDITED PROMPT SIBLING: also must not appear."] },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1,
+        "recipient": "all",
+        "metadata": {}
+      },
+      "parent": "n-a1",
+      "children": []
+    }
+  }
+}

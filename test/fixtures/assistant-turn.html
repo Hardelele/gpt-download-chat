@@ -1,0 +1,38 @@
+<!-- Trimmed copy of one ChatGPT assistant turn: code header with a Copy button,
+     a nested list, a GFM table, KaTeX math and a link. Used by html2md tests. -->
+<article data-testid="conversation-turn-4">
+  <div data-message-author-role="assistant" data-message-id="aaaabbbb-1111-2222-3333-444455556666">
+    <div class="markdown prose dark:prose-invert">
+      <h2>Benchmark results</h2>
+      <p>Slicing is <strong>fastest</strong>, <em>reversed()</em> is <del>slowest</del> lazy. See
+        <a href="https://docs.python.org/3/library/functions.html#reversed">the docs</a>.</p>
+      <ul>
+        <li>In place
+          <ul>
+            <li><code>xs.reverse()</code></li>
+          </ul>
+        </li>
+        <li>Copy
+          <ol>
+            <li><code>xs[::-1]</code></li>
+            <li><code>list(reversed(xs))</code></li>
+          </ol>
+        </li>
+      </ul>
+      <pre><div class="contain-inline-size rounded-md"><div class="flex items-center text-token-text-secondary px-4 py-2">python</div><div class="sticky top-9"><div class="absolute right-0"><button class="flex gap-1 items-center"><svg width="16"></svg>Copy code</button><button>Edit</button></div></div></div><div class="overflow-y-auto p-4"><code class="!whitespace-pre hljs language-python"><span class="hljs-keyword">import</span> timeit
+<span class="hljs-built_in">print</span>(timeit.timeit(<span class="hljs-string">'xs[::-1]'</span>))</code></div></pre>
+      <table>
+        <thead><tr><th>Method</th><th>Time (ms)</th></tr></thead>
+        <tbody>
+          <tr><td><code>xs[::-1]</code></td><td>4.1</td></tr>
+          <tr><td>reverse()</td><td>3.9</td></tr>
+        </tbody>
+      </table>
+      <blockquote><p>Note: timings are machine dependent.</p></blockquote>
+      <p>Complexity is <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>O</mi><mo stretchy="false">(</mo><mi>n</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">O(n)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base">O(n)</span></span></span> either way.</p>
+      <span class="katex-display"><span class="katex"><span class="katex-mathml"><math display="block"><semantics><mrow><mi>T</mi><mo>=</mo><mi>O</mi><mo stretchy="false">(</mo><mi>n</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">T = O(n)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base">T=O(n)</span></span></span></span>
+      <hr>
+      <p><img src="https://files.oaiusercontent.com/chart.png" alt="benchmark chart"></p>
+    </div>
+  </div>
+</article>
