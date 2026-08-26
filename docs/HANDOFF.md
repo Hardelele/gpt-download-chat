@@ -224,3 +224,129 @@ Chromium against a stubbed `chrome.*` (that is how the `[hidden]` bug was caught
 the light theme and the loading/ready transition are verified. **Not** verified: the
 dynamic-`import()` injection, the `data:` URL download, `chrome.storage.sync` persistence, and
 the dark theme in situ. All four are single-API calls with explicit error surfacing.
+
+---
+
+## Agent F — Google AI Mode extractor (`extensions/aimode/**`, `test/aimode-extract.test.mjs`, `store/aimode/**`)
+
+### What I built
+
+- `extensions/aimode/src/lib/extract.js` — `extractConversation(opts)` → the CONTRACT
+  `Conversation`, for an **AI Mode thread in Google Search** (and, as a fallback, an
+  **AI Overview** block). DOM-only; there is no callable same-origin JSON endpoint for this
+  surface (the answer streams over `/async/folwr`, which is not replayable from a content
+  script).
+- `extensions/aimode/manifest.json` — MV3, mirrors Agent B's shape. `permissions:
+  ["downloads","activeTab","scripting"]`, host permissions **path-scoped** to
+  `https://www.google.com/search*` and `https://www.google.com/ai*`.
+- `test/aimode-extract.test.mjs` — 34 tests, `node --test`, zero deps.
+- `store/aimode/listing.md` — name/short/full copy, permission justifications, and an
+  "honesty notes" section recording what was verified and what would invalidate the pitch.
+
+### What I actually verified about the live surface (2026-08-26) vs. what is assumed
+
+**Verified** (from Google's own help pages and from published scraper write-ups):
+
+| Fact | Consequence in the code |
+| --- | --- |
+| `udm=50` triggers AI Mode; `aep=11` also observed | URL handling, host permissions |
+| **`google.com/ai` is Google's own documented AI Mode entry point** | Added to `host_permissions` — the brief only mentioned `&udm=50`. Anyone wiring `content_scripts` must match both. |
+| `[data-session-thread-id]` marks the thread; the answer wraps it | `ROOT_STRATEGIES[0]`, lifts to the parent |
+| `[data-subtree="aimc"]` = "AI Mode container" | `ROOT_STRATEGIES[1]` |
+| Citation pills are `button[data-icl-uuid][data-amic="true"]` | `isCitationPill()` |
+| **Pill target URLs are not in the DOM** — they sit in hidden `<!--Sv6Kpe[["<uuid>",...]]-->` comment blocks | `parseCitationComments()`; this is why copy-paste loses every source, and why an in-page extension can do something the clipboard cannot |
+| Source rail: `a.ZbQNgf`, and `[data-container-id="rhs-col"] [role="dialog"] a` | `collectPanelSources()` |
+| AI Overview block: `#m-x-content [data-container-id="main-col"]` / `[data-rl]`, pills `[jsname="HtgYJd"]` | `ROOT_STRATEGIES[3..5]` |
+| AI Mode **does** have Share (public link, needs history + personalization on) and **does** appear in Takeout via Search Services History since the June 2026 history-controls split | Store copy does **not** claim "no export exists" — that would be false. It claims no per-thread *file* with citations, which is true. |
+
+**Assumed / not verifiable without a live signed-in page:**
+
+- That question turns are headings (`h1`-`h3` or `role="heading"`) and that the turns are
+  contiguous children of one column element. This is `findTurns()` strategy S2
+  (`heading-segmented`) and it is the path a normal multi-turn thread will take. It is the
+  single most likely thing to be wrong.
+- The exact JSON shape inside the `Sv6Kpe` comment. The parser is deliberately tolerant
+  (locate uuid, take the following slice, first URL and first plausible quoted title) rather
+  than assuming a field order.
+- Which "Show more"-style controls exist and what they are labelled. `expandThread()` matches
+  on `aria-label`/text landmarks, not classes.
+- Nothing here was run against a real google.com page. **Before publishing, someone must load
+  a real AI Mode thread and check `findTurns()` reports `heading-segmented`, not
+  `single-answer`.** A `single-answer` result on a multi-turn thread is not a crash — it
+  produces one run-on assistant message and a warning saying so — but it is a bad export.
+
+### How fragile is this, honestly
+
+Fragile, and structurally so — there is no stable contract on this page and no version of
+this extractor will be maintenance-free. Mitigations actually in the code:
+
+1. **No hashed class names are used as primary anchors.** The only class matched anywhere is
+   `ZbQNgf` (source rail), and it is one of several fallbacks, never load-bearing.
+2. **Prioritised, falling-through strategy arrays** (`ROOT_STRATEGIES`, then S1 explicit
+   turn attrs, S2 headings, S3 whole-panel). A single Google tweak degrades one level
+   instead of killing the export.
+3. **Loud, honest failure.** Unrecognised layout gives `messages: []` plus a warning naming
+   the anchors that were looked for. Recognised container but unsplittable gets its own
+   warning. A turn with a question but no answer text (answer still streaming) gets its own
+   warning. Citations that resolve to no URL keep their number, the line reads
+   `1. Title (link unavailable)`, and a warning says how many. There is no code path that
+   returns a plausible-looking but truncated file silently.
+4. **Never mutates the live page.** Everything runs on a `snapshot()` copy, so the citation
+   rewriting cannot break Google's own JS.
+
+Expected half-life of S2 without maintenance: months, not years. The attribute anchors
+(`data-session-thread-id`, `data-icl-uuid`) are more durable than the structure guesses.
+
+### AI Overviews — decision: **yes, covered, by the same extractor**
+
+One extractor handles both. They share the citation-pill model and the html2md path; the only
+real difference is that an AI Overview is a single answer with no follow-up turns and lives
+under `#m-x-content` instead of the AI Mode container. That is three extra entries in
+`ROOT_STRATEGIES` plus an `overview` flag that skips turn-segmentation and adds a warning
+saying "this was an AI Overview, not a thread". Splitting it into a second extractor would
+have duplicated the whole citation layer to save nothing. Note the trade-off: on an AI
+Overview the user's question comes from the `q` parameter, because the page has no question
+node of its own.
+
+### Requests / notes for other agents (I did not touch your files)
+
+1. **`html2md.js` import path.** `extract.js` imports it as
+   `../../../../extension/src/lib/html2md.js`. When the orchestrator hoists shared modules
+   into `shared/`, this line (and the same line in the Claude/Gemini extractors) needs
+   updating. It is the only cross-tree import in my file.
+2. **`html2md.parseHTML` discards comment nodes.** Correct for Markdown conversion, but it
+   means an HTML-string fixture can never carry the `Sv6Kpe` block that holds AI Mode's
+   citation URLs. My tests work around it by grafting comment nodes on after parsing
+   (`dom()` in `test/aimode-extract.test.mjs`). Real `document` keeps comments, so production
+   is unaffected. Agent A: no change requested, just be aware if you ever advertise
+   `parseHTML` as a general-purpose fixture parser.
+3. **`html2md` drops `<button>` (in `DROPPED_TAGS`).** Correct in general — but AI Mode's
+   citations *are* buttons. I rewrite every pill into an `<a>` before calling
+   `htmlToMarkdown`, so nothing is lost. Please do not "fix" this by un-dropping `button`.
+4. **Citation markers render as `[[1]](url)`** — bracketed number as the link label, which
+   CommonMark accepts (balanced inner brackets). If the renderer ever escapes `[` in message
+   text, this breaks; it currently does not.
+5. **Renderer labels.** `markdown.js` defaults to `assistantLabel: 'ChatGPT'`. For this item
+   the build should pass `{ userLabel: 'You', assistantLabel: 'AI Mode' }`. Not my file —
+   flagging it for whoever wires the per-item builds.
+6. **No `storage` permission** in `extensions/aimode/manifest.json`, on purpose (this item has
+   no options to remember). If the shared popup calls `chrome.storage`, either guard the call
+   or tell me and I will add the permission — I would rather add it than have the popup throw.
+7. **Missing from my tree by design** (shared, per CONTRACT-PLATFORMS): `icons/*`,
+   `src/popup/**`, `src/background.js`, `src/content.js`, `src/lib/markdown.js`,
+   `src/lib/filename.js`. `manifest.json` already points at `src/popup/popup.html` and
+   `src/background.js` in the shapes Agent B used, so hoisting should be a copy.
+8. **Deliberate deviation from CONTRACT section 3.** `extractConversation()` for AI Mode
+   *never* throws, including when zero messages are found — it returns `messages: []` with an
+   explanatory warning, per the Agent F brief ("never return a half-empty export that looks
+   successful"). Agent B's stated invariant (`toMarkdown` must handle an all-null,
+   zero-message Conversation) already covers this. The popup should surface `warnings[]` to
+   the user when `messages.length === 0` rather than downloading an empty file.
+9. **`store/aimode/assets/` screenshots are TODO** and need a real signed-in AI Mode capture.
+   The listing spells out what each must show.
+10. **Naming rule I checked, since it was flagged:** Google's branding guidelines forbid using
+    a Google trademark as a third-party product's name, and permit "for ..." phrasing with the
+    trademark symbol on the trademark. Hence `Chat2MD for AI Mode — Save AI answers as
+    Markdown` (49 chars) with "Google Search(TM)" only in the description body, plus a
+    non-affiliation line at the end of the detailed description. Do not rename this item to
+    anything starting with "Google".
