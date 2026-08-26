@@ -19,7 +19,17 @@ import {
   findEmbeddedPayload,
 } from '../extension/src/lib/api-client.js';
 import { extractConversation, normalizeConversation } from '../extension/src/lib/extract.js';
-import { turnToMessage, collectTurns, scrapeConversation } from '../extension/src/lib/dom-scrape.js';
+import {
+  turnToMessage,
+  collectTurns,
+  scrapeConversation,
+  harvestTurns,
+  completenessReport,
+  findScrollContainer,
+  roleOf,
+  turnIndex,
+  turnKey,
+} from '../extension/src/lib/dom-scrape.js';
 import { makeDocument } from './fixtures/fake-dom.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -341,7 +351,7 @@ test('scrapeConversation fills every contract key and warns about the degradatio
   assert.equal(conv.model, null);
   assert.equal(conv.createTime, null);
   assert.equal(conv.messages.length, 2);
-  assert.ok(conv.warnings.some((w) => /scraped from the page/i.test(w)));
+  assert.ok(conv.warnings.some((w) => /read from the page itself/i.test(w)));
 });
 
 test('scrapeConversation warns when the scroll loop hits its cap', async () => {
@@ -358,7 +368,7 @@ test('scrapeConversation warns when the scroll loop hits its cap', async () => {
     waitMs: 0,
     maxIterations: 4,
   });
-  assert.ok(conv.warnings.some((w) => /scroll attempts/.test(w)), conv.warnings.join(' | '));
+  assert.ok(conv.warnings.some((w) => /gave up rewinding|never scrolled fully/.test(w)), conv.warnings.join(' | '));
   assert.equal(conv.messages.length, 2, 'messages are still returned after a capped scroll');
 });
 
@@ -709,4 +719,233 @@ test('a 500 is not retried - only auth-shaped failures are', async () => {
     location: { origin: 'https://chatgpt.com', href: 'https://chatgpt.com/c/' + PAYLOAD.conversation_id },
   }), /500/);
   assert.equal(attempts, 1);
+});
+
+/* ------------------------------------------------------------------ */
+/* Current DOM shape (measured live: <section data-turn>, no <article>) */
+/* ------------------------------------------------------------------ */
+
+/** One turn in the shape the site ships today: section + data-turn + data-turn-id,
+ *  a LOCALISED sr-only speaker label, and no .markdown / .prose anywhere. */
+function currentTurnHtml(index, role, body) {
+  const label = role === 'user' ? 'Вы сказали:' : 'ChatGPT сказал:';
+  return '<section data-testid="conversation-turn-' + index + '" data-turn="' + role + '"'
+    + ' data-turn-id="uuid-' + index + '">'
+    + '<h4 class="sr-only">' + label + '</h4>'
+    + '<div class="fKQ0lq_Layout"><div class="WlXitW_TransitionGroupChild">'
+    + '<div class="flex max-w-full flex-col">' + body + '</div></div></div>'
+    + '<div class="flex"><button aria-label="Копировать">Копировать</button></div>'
+    + '</section>';
+}
+
+const CURRENT_SHAPE_HTML = '<main id="main">'
+  + currentTurnHtml(2, 'user', '<div class="text-message"><p>What is 2+2?</p></div>')
+  + currentTurnHtml(3, 'assistant', '<p>It is <strong>4</strong>.</p>'
+    + '<pre><div class="flex items-center">python</div><button>Copy code</button>'
+    + '<code class="language-python">print(2 + 2)</code></pre>')
+  + '</main>';
+
+test('the current shape parses: section/data-turn/data-turn-id, no article, no .markdown', () => {
+  const doc = makeDocument(CURRENT_SHAPE_HTML);
+
+  assert.equal(doc.querySelectorAll('article').length, 0, 'fixture really has no <article>');
+  assert.equal(doc.querySelectorAll('.markdown').length, 0, 'fixture really has no .markdown');
+  assert.equal(doc.querySelectorAll('[data-message-author-role]').length, 0);
+
+  const turns = collectTurns(doc);
+  assert.equal(turns.length, 2);
+
+  const [user, assistantTurn] = turns;
+  assert.equal(roleOf(user), 'user', 'role comes from data-turn');
+  assert.equal(roleOf(assistantTurn), 'assistant');
+  assert.equal(turnKey(user), 'id:uuid-2');
+  assert.equal(turnIndex(user), 2);
+
+  const u = turnToMessage(user);
+  assert.equal(u.id, 'uuid-2');
+  assert.equal(u.role, 'user');
+  assert.equal(u.text, 'What is 2+2?');
+
+  const a = turnToMessage(assistantTurn);
+  assert.equal(a.role, 'assistant');
+  assert.match(a.text, /It is \*\*4\*\*\./);
+  assert.match(a.text, /```python\nprint\(2 \+ 2\)\n```/, 'code survives without .markdown');
+});
+
+test('the localised sr-only speaker label never reaches the transcript', () => {
+  const doc = makeDocument(CURRENT_SHAPE_HTML);
+  const text = collectTurns(doc).map((t) => turnToMessage(t).text).join('\n');
+  assert.ok(!/сказал/i.test(text), 'Russian label leaked: ' + text);
+  assert.ok(!/said:/i.test(text));
+  assert.ok(!/Копировать/i.test(text), 'localised copy button leaked');
+});
+
+test('role is never guessed from the localised label — unknown stays unknown and is counted', () => {
+  const doc = makeDocument('<main><section data-testid="conversation-turn-9" data-turn-id="u-9">'
+    + '<h4 class="sr-only">ChatGPT сказал:</h4><div><p>orphan turn</p></div></section></main>');
+  const turn = collectTurns(doc)[0];
+  assert.equal(roleOf(turn), null, 'no data-turn, no author-role attribute -> honestly unknown');
+
+  const stats = {};
+  const msg = turnToMessage(turn, stats);
+  assert.equal(stats.unknownRoles, 1);
+  assert.equal(msg.text, 'orphan turn');
+});
+
+test('the legacy article/.markdown shape still parses (older builds, share snapshots)', () => {
+  const doc = makeDocument(TRANSCRIPT_HTML);
+  const turns = collectTurns(doc);
+  assert.equal(turns.length, 2);
+  assert.equal(roleOf(turns[0]), 'user', 'falls back to data-message-author-role');
+  const a = turnToMessage(turns[1]);
+  assert.match(a.text, /It is \*\*4\*\*\./);
+  assert.match(a.text, /```python/);
+});
+
+test('deepest text container skips hashed CSS-module wrappers', () => {
+  const doc = makeDocument('<main>' + currentTurnHtml(4, 'assistant', '<p>only this</p>') + '</main>');
+  const msg = turnToMessage(collectTurns(doc)[0]);
+  assert.equal(msg.text, 'only this');
+});
+
+/* ------------------------------------------------------------------ */
+/* Virtualisation: harvest while scrolling, then account for the gaps  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A transcript that behaves like the real one: only a window of turns is mounted
+ * at any scroll position, so no single read can ever see the whole conversation.
+ */
+function virtualisedDoc({ total = 101, turnHeight = 60, clientHeight = 400, overscan = 60 } = {}) {
+  const sections = [];
+  for (let i = 1; i <= total; i++) {
+    const role = i % 2 === 1 ? 'user' : 'assistant';
+    const html = currentTurnHtml(i, role, '<p>message ' + i + '</p>');
+    sections.push(makeDocument(html).querySelector('section'));
+  }
+  const container = { scrollTop: 0, scrollHeight: total * turnHeight, clientHeight };
+  const mounted = () => sections.filter((_, idx) => {
+    const top = idx * turnHeight;
+    return top >= container.scrollTop - overscan
+      && top <= container.scrollTop + clientHeight + overscan;
+  });
+  const doc = {
+    title: 'Long chat',
+    scrollingElement: container,
+    defaultView: { location: { href: 'https://chatgpt.com/c/long' } },
+    querySelectorAll: (sel) => (/conversation-turn|data-turn|data-message/.test(sel)
+      ? mounted().filter((el) => el.matches(sel))
+      : []),
+    querySelector(sel) { return this.querySelectorAll(sel)[0] || null; },
+  };
+  return { doc, container, mounted };
+}
+
+test('only a fraction of a long conversation is ever mounted at once', () => {
+  const { doc, mounted } = virtualisedDoc();
+  assert.ok(mounted().length < 12, 'window is small: ' + mounted().length);
+  assert.equal(collectTurns(doc).length, mounted().length);
+});
+
+test('harvesting while scrolling captures ALL 101 turns, in order', async () => {
+  const { doc } = virtualisedDoc({ total: 101 });
+  const warnings = [];
+  const { entries } = await harvestTurns(doc, { waitMs: 0, maxIterations: 10, warnings });
+
+  assert.equal(entries.length, 101, 'captured ' + entries.length + ' of 101');
+  assert.deepEqual(entries.map((e) => e.index).slice(0, 5), [1, 2, 3, 4, 5]);
+  assert.equal(entries[0].message.text, 'message 1');
+  assert.equal(entries[100].message.text, 'message 101');
+  assert.equal(entries[0].message.role, 'user');
+  assert.equal(entries[1].message.role, 'assistant');
+
+  const report = completenessReport(entries);
+  assert.deepEqual(report.missing, []);
+  assert.deepEqual(report.warnings, [], 'a complete harvest must not cry wolf');
+});
+
+test('scrapeConversation returns the whole virtualised chat with no scary warning', async () => {
+  const { doc } = virtualisedDoc({ total: 101 });
+  const conv = await scrapeConversation({
+    document: doc,
+    location: { href: 'https://chatgpt.com/c/long' },
+    waitMs: 0,
+    maxIterations: 10,
+  });
+  assert.equal(conv.messages.length, 101);
+  assert.equal(conv.extractedVia, 'dom');
+  assert.ok(!conv.warnings.some((w) => /INCOMPLETE/.test(w)), conv.warnings.join(' | '));
+  assert.ok(conv.warnings.some((w) => /read from the page itself/.test(w)));
+});
+
+test('a truncated scrape is reported LOUDLY, never returned as if complete', () => {
+  // Exactly what the coordinator measured at rest: turn-2, 4, 12, 13 and nothing else.
+  const entries = [2, 4, 12, 13].map((index, order) => ({ index, order, message: { text: 'x' } }));
+  const report = completenessReport(entries);
+
+  assert.equal(report.captured, 4);
+  assert.equal(report.implied, 12);
+  assert.deepEqual(report.missing, [3, 5, 6, 7, 8, 9, 10, 11]);
+  assert.equal(report.warnings.length, 1);
+  assert.match(report.warnings[0], /^INCOMPLETE EXPORT/);
+  assert.match(report.warnings[0], /captured 4 of about 12 turns/);
+  assert.match(report.warnings[0], /turn 3, 5, 6, 7, 8, 9, 10, 11/);
+});
+
+test('a transcript that starts at a high turn index warns about the missing head', () => {
+  const entries = [40, 41, 42].map((index, order) => ({ index, order, message: { text: 'x' } }));
+  const report = completenessReport(entries);
+  assert.deepEqual(report.missing, []);
+  assert.equal(report.warnings.length, 1);
+  assert.match(report.warnings[0], /starts at turn 40, so roughly 39 earlier message/);
+});
+
+test('completenessReport stays quiet when turns carry no index at all', () => {
+  const report = completenessReport([{ index: null, order: 0, message: {} }]);
+  assert.equal(report.implied, null);
+  assert.deepEqual(report.warnings, []);
+});
+
+test('a caller-supplied expected count catches truncation the indices cannot', async () => {
+  const doc = makeDocument(CURRENT_SHAPE_HTML);
+  const conv = await scrapeConversation({
+    document: doc,
+    location: { href: 'https://chatgpt.com/c/abc' },
+    waitMs: 0,
+    maxIterations: 2,
+    expectedMessageCount: 101,
+  });
+  assert.equal(conv.messages.length, 2);
+  assert.ok(conv.warnings.some((w) => /INCOMPLETE EXPORT — the conversation has 101 messages but only 2/.test(w)),
+    conv.warnings.join(' | '));
+});
+
+test('findScrollContainer picks the larger of the two real scrollable candidates', () => {
+  const doc = makeDocument('<main id="main"><div class="overflow-y-auto">'
+    + currentTurnHtml(2, 'user', '<p>hi</p>') + '</div></main>');
+  const main = doc.querySelector('main');
+  const scroller = doc.querySelector('div');
+
+  // Measured live: transcript div 4118/812, main#main 4066/760.
+  main.scrollHeight = 4066; main.clientHeight = 760;
+  scroller.scrollHeight = 4118; scroller.clientHeight = 812;
+
+  assert.equal(findScrollContainer(doc), scroller, 'largest scrollable wins');
+
+  // Flip the sizes: the decision must follow the measurement, not the selector order.
+  main.scrollHeight = 9000;
+  assert.equal(findScrollContainer(doc), main);
+});
+
+test('a page with nothing scrollable degrades to the scrolling element and warns', async () => {
+  const doc = makeDocument(CURRENT_SHAPE_HTML);
+  doc.scrollingElement = null;
+  const conv = await scrapeConversation({
+    document: doc,
+    location: { href: 'https://chatgpt.com/c/abc' },
+    waitMs: 0,
+    maxIterations: 2,
+  });
+  assert.equal(conv.messages.length, 2, 'still returns what is on screen');
+  assert.ok(conv.warnings.some((w) => /scroll container/.test(w)), conv.warnings.join(' | '));
 });

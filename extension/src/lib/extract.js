@@ -16,7 +16,18 @@ import {
   nodeToMessage,
   renderContent,
 } from './api-client.js';
-import { scrapeConversation, collectTurns, turnToMessage, loadFullTranscript } from './dom-scrape.js';
+import {
+  scrapeConversation,
+  collectTurns,
+  turnToMessage,
+  loadFullTranscript,
+  harvestTurns,
+  completenessReport,
+  findScrollContainer,
+  roleOf,
+  turnIndex,
+  turnKey,
+} from './dom-scrape.js';
 import { htmlToMarkdown } from './html2md.js';
 
 /**
@@ -174,7 +185,16 @@ export async function extractConversation(opts = {}) {
   let domResult = null;
   try {
     domResult = normalizeConversation(
-      await scrapeConversation({ ...opts, conversationId, location: loc }),
+      await scrapeConversation({
+        ...opts,
+        conversationId,
+        location: loc,
+        // If the API did answer (just with nothing visible), we know how many
+        // messages the active branch really has — hold the scrape to that.
+        expectedMessageCount: apiResult && apiResult.messages.length
+          ? apiResult.messages.length
+          : opts.expectedMessageCount,
+      }),
       { id: conversationId, sourceUrl },
     );
     domResult.extractedVia = 'dom';
@@ -218,6 +238,12 @@ export {
   collectTurns,
   turnToMessage,
   loadFullTranscript,
+  harvestTurns,
+  completenessReport,
+  findScrollContainer,
+  roleOf,
+  turnIndex,
+  turnKey,
   htmlToMarkdown,
 };
 

@@ -267,6 +267,16 @@ function isUiNoise(text) {
   return UI_NOISE.has(String(text).trim().toLowerCase());
 }
 
+/**
+ * `sr-only` / `visually-hidden` elements exist for screen readers, not for the
+ * transcript. ChatGPT puts a LOCALISED speaker label in one ("ChatGPT said:",
+ * "ChatGPT сказал:"), which would otherwise be pasted into every message.
+ */
+function isScreenReaderOnly(node) {
+  const classes = classOf(node).split(/\s+/);
+  return classes.includes('sr-only') || classes.includes('visually-hidden');
+}
+
 function collapse(text) {
   return String(text).replace(/[\t\f\r ]*\n[\t\f\r ]*/g, ' ').replace(/[ \t ]+/g, ' ');
 }
@@ -392,6 +402,7 @@ function inline(node) {
   const t = tag(node);
   if (DROPPED_TAGS.has(t)) return '';
   if (attr(node, 'aria-hidden') === 'true' && !isKatex(node)) return '';
+  if (isScreenReaderOnly(node)) return '';
   if (isKatex(node)) return katexToMarkdown(node);
 
   const kids = () => childNodesOf(node).map(inline).join('');
@@ -456,6 +467,7 @@ function blocks(node) {
     const t = tag(child);
     if (DROPPED_TAGS.has(t)) continue;
     if (attr(child, 'aria-hidden') === 'true' && !isKatex(child)) continue;
+    if (isScreenReaderOnly(child)) continue;
     if (isKatex(child)) {
       const math = katexToMarkdown(child);
       if (hasClass(child, 'katex-display') || classOf(child).includes('katex-display')) {
