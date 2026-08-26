@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — Chat2MD</title>
+<meta name="description" content="Chat2MD collects nothing, sends nothing, and stores nothing. Full privacy policy for the Chat2MD Chrome extension.">
+<style>
+  :root {
+    --ink: #0d1218;
+    --ink-2: #1c2633;
+    --paper: #f8fafc;
+    --muted: #5b6673;
+    --amber: #f7b733;
+    --rule: #e3e8ee;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 44rem; margin: 0 auto; padding: 0 1.5rem 5rem; }
+  header {
+    background: linear-gradient(180deg, var(--ink-2), var(--ink));
+    color: var(--paper);
+    padding: 3rem 1.5rem 2.5rem;
+  }
+  header .wrap { padding-bottom: 0; }
+  header h1 { margin: 0 0 .4rem; font-size: 2rem; letter-spacing: -.02em; }
+  header p { margin: 0; color: #9aa7b5; }
+  header .badge {
+    display: inline-block; margin-bottom: 1.25rem; padding: .25rem .6rem;
+    border: 1px solid rgba(247,183,51,.5); border-radius: 999px;
+    color: var(--amber); font-size: .75rem; letter-spacing: .08em; text-transform: uppercase;
+  }
+  h2 { margin: 2.5rem 0 .75rem; font-size: 1.15rem; letter-spacing: -.01em; }
+  h2::before { content: ""; display: block; width: 2rem; height: 3px; background: var(--amber); margin-bottom: .75rem; border-radius: 2px; }
+  p, li { color: #26313d; }
+  ul { padding-left: 1.15rem; }
+  li { margin: .35rem 0; }
+  a { color: #0d5bd1; }
+  code { background: #eef2f6; padding: .1rem .35rem; border-radius: 4px; font-size: .9em; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .95rem; display: block; overflow-x: auto; }
+  th, td { text-align: left; padding: .6rem .7rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-size: .78rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .lede { font-size: 1.05rem; border-left: 3px solid var(--amber); padding-left: 1rem; margin: 2rem 0; }
+  footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--rule); color: var(--muted); font-size: .9rem; }
+  @media (prefers-color-scheme: dark) {
+    :root { --paper: #0f141a; --rule: #232d38; --muted: #8b98a6; }
+    body { color: #e6ecf2; }
+    p, li { color: #c6d0da; }
+    a { color: #78b4ff; }
+    code { background: #1a222b; }
+    .lede { color: #e6ecf2; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <span class="badge">Chat2MD</span>
+    <h1>Privacy Policy</h1>
+    <p>Last updated 26 August 2026 &middot; applies to all versions of the Chat2MD browser extension</p>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <p class="lede">
+    Chat2MD does not collect, transmit, store, or sell any data. There is no server, no
+    account, no analytics, and no third-party code. Everything happens inside your browser,
+    and the only thing the extension produces is a <code>.md</code> file in your Downloads folder.
+  </p>
+
+  <h2>What Chat2MD handles</h2>
+  <p>When you click <strong>Download .md</strong>, the extension reads the conversation open in your active tab. To do that it accesses:</p>
+  <ul>
+    <li>the conversation content — titles, message text, timestamps, model name, attachment names and URLs — as ChatGPT already serves it to your own logged-in browser session;</li>
+    <li>the URL of the active tab, so it knows which conversation you meant.</li>
+  </ul>
+  <p>That content is converted to Markdown in memory, inside the page, and handed straight to Chrome's download machinery. It is not copied anywhere else.</p>
+
+  <h2>What Chat2MD does not do</h2>
+  <ul>
+    <li><strong>No collection.</strong> Nothing is written to any storage the developer can read.</li>
+    <li><strong>No transmission.</strong> The extension makes no requests to any server operated by the developer or anyone else. The only requests it makes are to <code>chatgpt.com</code> / <code>chat.openai.com</code> — the site you are already on — using your existing session, exactly as the page itself would.</li>
+    <li><strong>No analytics or telemetry.</strong> No page views, no event counters, no crash reporting, no identifiers, no fingerprinting.</li>
+    <li><strong>No advertising.</strong> Your data is never used for ads, targeting, or profiling.</li>
+    <li><strong>No sale or transfer.</strong> There is nothing to sell and no one to transfer it to.</li>
+    <li><strong>No remote code.</strong> All JavaScript ships inside the package. Nothing is fetched or evaluated from a remote source.</li>
+    <li><strong>No background activity.</strong> Nothing runs until you open the popup and click the button.</li>
+  </ul>
+
+  <h2>Where your data goes</h2>
+  <p>Into the file you asked for. Chrome's <code>downloads</code> permission writes it to your normal download location. What happens to that file afterwards is entirely up to you — the extension never reads it back.</p>
+
+  <h2>Permissions and why they exist</h2>
+  <table>
+    <thead><tr><th>Permission</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td><code>downloads</code></td><td>To save the generated Markdown file to your computer. This is the extension's entire output.</td></tr>
+      <tr><td><code>activeTab</code></td><td>To act on the conversation in the tab you are currently looking at, and only after you click the extension's button.</td></tr>
+      <tr><td><code>scripting</code></td><td>To run the bundled extraction code inside that one tab so it can read the conversation. Nothing is downloaded to run.</td></tr>
+      <tr><td>Host access to <code>chatgpt.com</code> / <code>chat.openai.com</code></td><td>To read the conversation from the site you are on. Chat2MD requests access to no other website.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Limited Use disclosure</h2>
+  <p>
+    Chat2MD's use of information received from Google APIs and from the user's browsing session adheres to the
+    <a href="https://developer.chrome.com/docs/webstore/program-policies/user-data-faq">Chrome Web Store User Data Policy</a>,
+    including the Limited Use requirements. The data accessed is used <strong>solely</strong> to provide the single
+    user-facing feature — producing a Markdown file of the conversation the user explicitly chose to export — and for
+    no other purpose. It is not transferred to any third party, not used for advertising, not used to build user
+    profiles, and not read by humans.
+  </p>
+
+  <h2>Children</h2>
+  <p>Chat2MD is not directed at children and collects no data from anyone, of any age.</p>
+
+  <h2>Changes to this policy</h2>
+  <p>Any change will be published at this URL with a new "last updated" date. Because the extension collects nothing, a change would most likely mean a change in permissions — and Chrome shows you those before an update installs.</p>
+
+  <h2>Source code</h2>
+  <p>Chat2MD is open source under the MIT licence. Every claim on this page can be checked against the code: <a href="https://github.com/hardelele/gpt-download-chat">github.com/hardelele/gpt-download-chat</a></p>
+
+  <h2>Contact</h2>
+  <p>Questions or a privacy concern: open an issue at <a href="https://github.com/hardelele/gpt-download-chat/issues">github.com/hardelele/gpt-download-chat/issues</a>, or email <a href="mailto:hardelele@yahoo.com">hardelele@yahoo.com</a>.</p>
+
+  <footer>
+    Chat2MD &middot; MIT licence &middot; &copy; 2026 Hardelele &middot; <a href="./">home</a>
+  </footer>
+
+</main>
+</body>
+</html>

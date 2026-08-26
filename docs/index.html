@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chat2MD — Save ChatGPT chats as Markdown</title>
+<meta name="description" content="A Chrome extension that exports a whole ChatGPT conversation to a clean Markdown file. No account, no server, no data collection.">
+<style>
+  :root { --ink:#0d1218; --ink-2:#1c2633; --paper:#f8fafc; --muted:#5b6673; --amber:#f7b733; --rule:#e3e8ee; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--paper); color:var(--ink);
+         font:16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+         -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:44rem; margin:0 auto; padding:0 1.5rem 5rem; }
+  header { background:linear-gradient(180deg,var(--ink-2),var(--ink)); color:var(--paper); padding:4rem 1.5rem 3rem; }
+  header .wrap { padding-bottom:0; }
+  header h1 { margin:0 0 .6rem; font-size:2.4rem; letter-spacing:-.03em; }
+  header p { margin:0; color:#9aa7b5; font-size:1.1rem; max-width:32rem; }
+  .badge { display:inline-block; margin-bottom:1.25rem; padding:.25rem .6rem;
+           border:1px solid rgba(247,183,51,.5); border-radius:999px; color:var(--amber);
+           font-size:.75rem; letter-spacing:.08em; text-transform:uppercase; }
+  h2 { margin:2.75rem 0 .75rem; font-size:1.15rem; letter-spacing:-.01em; }
+  h2::before { content:""; display:block; width:2rem; height:3px; background:var(--amber); margin-bottom:.75rem; border-radius:2px; }
+  p, li { color:#26313d; }
+  ul { padding-left:1.15rem; } li { margin:.35rem 0; }
+  a { color:#0d5bd1; }
+  code { background:#eef2f6; padding:.1rem .35rem; border-radius:4px; font-size:.9em; }
+  pre { background:#0f141a; color:#e6ecf2; padding:1rem 1.1rem; border-radius:8px; overflow-x:auto; font-size:.9rem; }
+  pre code { background:none; padding:0; color:inherit; }
+  footer { margin-top:3rem; padding-top:1.5rem; border-top:1px solid var(--rule); color:var(--muted); font-size:.9rem; }
+  @media (prefers-color-scheme: dark) {
+    :root { --paper:#0f141a; --rule:#232d38; --muted:#8b98a6; }
+    body { color:#e6ecf2; } p, li { color:#c6d0da; } a { color:#78b4ff; } code { background:#1a222b; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <span class="badge">Chrome extension &middot; MIT</span>
+    <h1>Chat2MD</h1>
+    <p>Save a whole ChatGPT conversation as a clean Markdown file. One click, no account, nothing leaves your machine.</p>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <h2>What it does</h2>
+  <p>
+    Copy-pasting a long ChatGPT thread out of the browser gives you a mangled blob: the page only keeps
+    part of the conversation in the DOM, code blocks lose their language, tables collapse, and LaTeX turns
+    into noise. Chat2MD reads the conversation the way the app itself does and writes proper Markdown —
+    the <em>entire</em> thread, not just the part scrolled into view.
+  </p>
+  <ul>
+    <li>Fenced code blocks keep their language tags.</li>
+    <li>Tables, nested lists and LaTeX survive intact.</li>
+    <li>YAML front matter with the title, URL, model and dates.</li>
+    <li>Optional timestamps, system messages, tool calls and reasoning.</li>
+  </ul>
+
+  <h2>Install</h2>
+  <p>From source, until the Chrome Web Store listing is live:</p>
+  <pre><code>git clone https://github.com/hardelele/gpt-download-chat
+# chrome://extensions -> Developer mode -> Load unpacked -> pick extension/</code></pre>
+
+  <h2>Privacy</h2>
+  <p>
+    No servers, no analytics, no accounts, no data collection of any kind. The extension talks only to
+    <code>chatgpt.com</code>, using the session you are already logged into.
+    Read the full <a href="./privacy.html">privacy policy</a>.
+  </p>
+
+  <h2>Source</h2>
+  <p><a href="https://github.com/hardelele/gpt-download-chat">github.com/hardelele/gpt-download-chat</a></p>
+
+  <footer>Chat2MD &middot; MIT licence &middot; &copy; 2026 Hardelele</footer>
+</main>
+</body>
+</html>

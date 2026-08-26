@@ -1,0 +1,12 @@
+# Keep binaries byte-exact across platforms; normalise text in the repo.
+*.png binary
+*.jpg binary
+*.zip binary
+
+*.js   text eol=lf
+*.mjs  text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
+*.css  text eol=lf
+*.html text eol=lf
+*.yml  text eol=lf

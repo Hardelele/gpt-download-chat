@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: test + verify + package
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # No runtime or dev dependencies — nothing to install.
+      - name: Show environment
+        run: node --version
+
+      - name: Test
+        run: npm test
+
+      - name: Verify (store pre-publish gate)
+        run: npm run verify
+
+      - name: Build
+        run: npm run build
+
+      - name: Read extension version
+        id: ver
+        run: echo "version=$(node -p "require('./extension/manifest.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Upload extension zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: chat2md-${{ steps.ver.outputs.version }}
+          path: dist/chat2md-${{ steps.ver.outputs.version }}.zip
+          if-no-files-found: error
+          retention-days: 30
