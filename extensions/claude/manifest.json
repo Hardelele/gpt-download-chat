@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "Chat2MD for Claude — Save chats as Markdown",
+  "version": "0.1.0",
+  "description": "Export any Claude conversation to a clean Markdown file. Code, artifacts and tables survive. Runs entirely on your machine.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "Save this chat as Markdown",
+    "default_popup": "src/popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "permissions": ["downloads", "activeTab", "scripting", "storage"],
+  "host_permissions": ["https://claude.ai/*"],
+  "web_accessible_resources": [
+    {
+      "resources": ["src/lib/*.js"],
+      "matches": ["https://claude.ai/*"]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}
