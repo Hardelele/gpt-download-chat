@@ -346,9 +346,9 @@ export function mapConversationPayload(payload, opts = {}) {
   }
 
   const totalNodes = Object.keys(mapping).filter((k) => mapping[k] && mapping[k].message).length;
-  if (totalNodes > branch.length + 1 && branch.length) {
+  if (totalNodes > messages.length && messages.length) {
     warnings.push(
-      `Conversation has ${totalNodes - branch.length} node(s) outside the active branch `
+      `Conversation has ${totalNodes - messages.length} message(s) outside the active branch `
       + '(edited prompts / regenerated answers); only the active branch was exported.',
     );
   }
