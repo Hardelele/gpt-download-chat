@@ -385,6 +385,61 @@ export function mapConversationPayload(payload, opts = {}) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Embedded payload (shared links)                                     */
+/* ------------------------------------------------------------------ */
+
+/** Does this object look like a conversation payload? */
+function looksLikeConversation(value) {
+  return Boolean(
+    value && typeof value === 'object' && !Array.isArray(value)
+    && value.mapping && typeof value.mapping === 'object'
+    && Object.keys(value.mapping).length > 0,
+  );
+}
+
+function searchForConversation(value, depth = 0) {
+  if (depth > 8 || !value || typeof value !== 'object') return null;
+  if (looksLikeConversation(value)) return value;
+  const children = Array.isArray(value) ? value : Object.values(value);
+  for (const child of children) {
+    const found = searchForConversation(child, depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
+
+function tryParseJson(text) {
+  try { return JSON.parse(text); } catch { /* fall through */ }
+  const first = text.indexOf('{');
+  const last = text.lastIndexOf('}');
+  if (first === -1 || last <= first) return null;
+  try { return JSON.parse(text.slice(first, last + 1)); } catch { return null; }
+}
+
+/**
+ * `/share/<id>` pages have no reachable backend endpoint, but the server ships
+ * the very same conversation JSON inside a <script> tag. Reading it gives full
+ * fidelity (timestamps, model, branch structure) instead of scraped HTML.
+ *
+ * @param {Document} doc
+ * @returns {object|null} raw conversation payload
+ */
+export function findEmbeddedPayload(doc) {
+  if (!doc || typeof doc.querySelectorAll !== 'function') return null;
+  let scripts;
+  try { scripts = Array.prototype.slice.call(doc.querySelectorAll('script')); } catch { return null; }
+  for (const script of scripts) {
+    const text = script && typeof script.textContent === 'string' ? script.textContent : '';
+    if (!text || text.length < 40 || !text.includes('"mapping"')) continue;
+    const parsed = tryParseJson(text);
+    if (!parsed) continue;
+    const found = searchForConversation(parsed);
+    if (found) return found;
+  }
+  return null;
+}
+
+/* ------------------------------------------------------------------ */
 /* Browser-touching layer                                              */
 /* ------------------------------------------------------------------ */
 

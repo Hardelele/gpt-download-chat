@@ -10,6 +10,7 @@ import {
   parseConversationId,
   isShareUrl,
   extractViaApi,
+  findEmbeddedPayload,
   mapConversationPayload,
   buildBranch,
   nodeToMessage,
@@ -96,6 +97,16 @@ function normalizeMessage(message) {
 function str(v) { return typeof v === 'string' && v.trim() ? v.trim() : (typeof v === 'string' ? v : null); }
 function num(v) { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : null; }
 
+/** Never let a broken page break extraction. */
+function safeEmbeddedPayload(opts) {
+  try {
+    const doc = opts.document || (typeof globalThis !== 'undefined' ? globalThis.document : null);
+    return doc ? findEmbeddedPayload(doc) : null;
+  } catch {
+    return null;
+  }
+}
+
 function visibleCount(conversation) {
   return conversation.messages.filter((m) => !m.hidden).length;
 }
@@ -116,8 +127,18 @@ export async function extractConversation(opts = {}) {
   let apiResult = null;
   if (!opts.preferDom) {
     if (isShareUrl(sourceUrl)) {
-      warnings.push('Shared conversation link — the backend API is not reachable here, '
-        + 'so the page itself was read instead.');
+      // Share pages have no reachable endpoint, but they ship the same JSON inline.
+      const embedded = safeEmbeddedPayload(opts);
+      if (embedded) {
+        apiResult = normalizeConversation(
+          mapConversationPayload(embedded, { sourceUrl, conversationId, extractedVia: 'api' }),
+          { id: conversationId, sourceUrl },
+        );
+        warnings.push('Shared conversation link — read from the conversation JSON embedded in the page.');
+      } else {
+        warnings.push('Shared conversation link — the backend API is not reachable here, '
+          + 'so the page itself was read instead.');
+      }
     } else if (!conversationId) {
       warnings.push('Could not find a conversation id in the URL; the page itself was read instead.');
     } else {
@@ -129,6 +150,15 @@ export async function extractConversation(opts = {}) {
       } catch (err) {
         warnings.push(`Backend API path failed (${err && err.message ? err.message : err}); `
           + 'fell back to reading the page.');
+        // The page may still carry the conversation JSON inline — better than scraping.
+        const embedded = safeEmbeddedPayload(opts);
+        if (embedded) {
+          apiResult = normalizeConversation(
+            mapConversationPayload(embedded, { sourceUrl, conversationId, extractedVia: 'api' }),
+            { id: conversationId, sourceUrl },
+          );
+          warnings.push('Recovered the conversation JSON embedded in the page instead.');
+        }
       }
     }
   }
@@ -179,6 +209,7 @@ export {
   parseConversationId,
   isShareUrl,
   mapConversationPayload,
+  findEmbeddedPayload,
   buildBranch,
   nodeToMessage,
   renderContent,

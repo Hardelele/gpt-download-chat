@@ -13,6 +13,7 @@ import {
   mapConversationPayload,
   extractViaApi,
   getAccessToken,
+  findEmbeddedPayload,
 } from '../extension/src/lib/api-client.js';
 import { extractConversation, normalizeConversation } from '../extension/src/lib/extract.js';
 import { turnToMessage, collectTurns, scrapeConversation } from '../extension/src/lib/dom-scrape.js';
@@ -60,6 +61,10 @@ const TRANSCRIPT_HTML = `
     </div>
   </article>
 </main>`;
+
+const SHARE_TURNS = '<main><article data-testid="conversation-turn-1">'
+  + '<div data-message-author-role="user" data-message-id="s-1">'
+  + '<div class="whitespace-pre-wrap">shared question</div></div></article></main>';
 
 /* ------------------------------------------------------------------ */
 /* URL parsing                                                         */
@@ -401,6 +406,38 @@ test('extractConversation goes straight to the DOM for a /share/ link', async ()
   assert.equal(conv.extractedVia, 'dom');
   assert.ok(!fetchImpl.calls.some((c) => c.url.includes('/backend-api/conversation/')));
   assert.ok(conv.warnings.some((w) => /Shared conversation link/.test(w)));
+});
+
+test('findEmbeddedPayload digs the conversation JSON out of a __NEXT_DATA__ script', () => {
+  const embedded = { props: { pageProps: { serverResponse: { data: PAYLOAD } } } };
+  const doc = makeDocument(
+    `<html><body>${SHARE_TURNS}<script id="__NEXT_DATA__" type="application/json">`
+    + `${JSON.stringify(embedded)}</script></body></html>`,
+  );
+  const found = findEmbeddedPayload(doc);
+  assert.ok(found, 'payload found');
+  assert.equal(found.current_node, 'n-a2');
+
+  assert.equal(findEmbeddedPayload(makeDocument('<html><body><script>var x = 1;</script></body></html>')), null);
+  assert.equal(findEmbeddedPayload(null), null);
+});
+
+test('a /share/ page with embedded JSON keeps full fidelity instead of scraping', async () => {
+  const embedded = { props: { pageProps: { serverResponse: { data: PAYLOAD } } } };
+  const conv = await extractConversation({
+    fetch: fakeFetch([]),
+    location: { origin: 'https://chatgpt.com', href: 'https://chatgpt.com/share/abc-1234-5678-90ab' },
+    document: makeDocument(
+      `<html><body>${SHARE_TURNS}<script id="__NEXT_DATA__">${JSON.stringify(embedded)}</script></body></html>`,
+    ),
+    waitMs: 0,
+    maxIterations: 2,
+  });
+  assert.equal(conv.extractedVia, 'api');
+  assert.equal(conv.model, 'gpt-4o');
+  assert.equal(conv.createTime, PAYLOAD.create_time);
+  assert.equal(conv.messages.length, 8);
+  assert.ok(conv.warnings.some((w) => /embedded in the page/.test(w)));
 });
 
 test('extractConversation throws only when both paths yield nothing', async () => {
