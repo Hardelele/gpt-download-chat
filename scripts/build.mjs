@@ -2,8 +2,12 @@
 /**
  * build.mjs — validate, stage and package the extension.
  *
- *   node scripts/build.mjs            # verify -> dist/chat2md-<v>/ -> dist/chat2md-<v>.zip
- *   node scripts/build.mjs --zip-only # skip the verify gate (used by `npm run zip`)
+ *   node scripts/build.mjs                              # the ChatGPT build
+ *   node scripts/build.mjs --dir extensions/claude      # any other store item
+ *   node scripts/build.mjs --zip-only                   # skip the verify gate
+ *
+ * The output stem comes from the manifest's own name, so the Claude / Gemini /
+ * AI Mode builds (CONTRACT-PLATFORMS.md) work through this same script.
  *
  * The ZIP is written by hand with node:zlib (deflateRaw + local headers + central
  * directory). No dependencies, no shelling out to PowerShell — which also avoids
@@ -29,9 +33,19 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const EXT = join(ROOT, 'extension');
 const DIST = join(ROOT, 'dist');
 const ZIP_ONLY = process.argv.includes('--zip-only');
+
+const DIR_ARG = (() => {
+  const i = process.argv.indexOf('--dir');
+  return i !== -1 && process.argv[i + 1] ? process.argv[i + 1] : 'extension';
+})();
+const EXT = join(ROOT, DIR_ARG);
+
+if (!existsSync(join(EXT, 'manifest.json'))) {
+  console.error(`build: no manifest.json under ${DIR_ARG}/ — nothing to package`);
+  process.exit(1);
+}
 
 const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
 
@@ -42,7 +56,7 @@ const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
 if (!ZIP_ONLY) {
   console.log('build: running verify gate...');
   try {
-    const out = execFileSync(process.execPath, [join(ROOT, 'scripts', 'verify.mjs')], {
+    const out = execFileSync(process.execPath, [join(ROOT, 'scripts', 'verify.mjs'), '--dir', DIR_ARG], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -64,7 +78,11 @@ if (manifest.version !== pkg.version) {
   process.exit(1);
 }
 
-const stem = `chat2md-${version}`;
+// Deterministic stem from the source tree, not the display name:
+//   extension/            -> chat2md-<version>
+//   extensions/claude/    -> chat2md-claude-<version>
+const dirLeaf = DIR_ARG.split(/[\\/]/).filter(Boolean).pop();
+const stem = `chat2md${dirLeaf === 'extension' ? '' : '-' + dirLeaf}-${version}`;
 const stageDir = join(DIST, stem);
 const zipPath = join(DIST, `${stem}.zip`);
 

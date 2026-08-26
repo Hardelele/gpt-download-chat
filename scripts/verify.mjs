@@ -200,8 +200,22 @@ const REMOTE_CODE = [
   { re: /["']https?:\/\/[^"']*\.js["']/i, msg: 'a remote .js URL' },
 ];
 
-// Network egress: the only host we are allowed to talk to.
-const ALLOWED_HOSTS = /^(chatgpt\.com|chat\.openai\.com)$/;
+// Network egress: the only hosts we may talk to are the ones the manifest itself
+// declares. Derived, not hardcoded, so this gate works unchanged for the Claude,
+// Gemini and AI Mode builds (see CONTRACT-PLATFORMS.md).
+const allowedHosts = new Set();
+for (const pattern of [
+  ...(manifest?.host_permissions ?? []),
+  ...(manifest?.content_scripts ?? []).flatMap((cs) => cs.matches ?? []),
+]) {
+  const m = /^[a-z*]+:\/\/([^/]+)/i.exec(pattern);
+  if (m) allowedHosts.add(m[1].replace(/^\*\./, '').toLowerCase());
+}
+// Documentation / repository links are never egress.
+const DOC_HOSTS = /(^|\.)(w3\.org|github\.com|github\.io|developer\.chrome\.com|schema\.org)$/;
+const isAllowedHost = (h) =>
+  allowedHosts.has(h) || [...allowedHosts].some((a) => h === a || h.endsWith('.' + a)) || DOC_HOSTS.test(h);
+
 const URL_RE = /https?:\/\/([a-z0-9.-]+)/gi;
 
 for (const file of allFiles) {
@@ -213,11 +227,12 @@ for (const file of allFiles) {
     if (re.test(src)) fail(`${r} contains ${msg} — remote code is banned by MV3 and by this project`);
   }
 
+  const seen = new Set();
   for (const m of src.matchAll(URL_RE)) {
-    const host = m[1].toLowerCase();
-    if (ALLOWED_HOSTS.test(host)) continue;
-    if (host.endsWith('.w3.org') || host === 'github.com' || host.endsWith('.github.io')) continue; // docs/links
-    warn(`${r} mentions host "${host}" — confirm it is a comment/link and not network egress`);
+    const host = m[1].toLowerCase().replace(/\.$/, '');
+    if (seen.has(host) || isAllowedHost(host)) continue;
+    seen.add(host);
+    warn(`${r} mentions host "${host}" — not declared in the manifest; confirm it is a comment, not egress`);
   }
 }
 
