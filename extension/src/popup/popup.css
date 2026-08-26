@@ -39,6 +39,12 @@
   box-sizing: border-box;
 }
 
+/* Panes set their own `display`, which would otherwise out-specify the UA
+   `[hidden] { display: none }` rule and leave two panes on screen at once. */
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   margin: 0;
