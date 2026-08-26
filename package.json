@@ -1,0 +1,35 @@
+{
+  "name": "gpt-download-chat",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Chat2MD — a Chrome MV3 extension that saves a full ChatGPT conversation as a Markdown file.",
+  "license": "MIT",
+  "author": "Hardelele",
+  "homepage": "https://github.com/hardelele/gpt-download-chat",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hardelele/gpt-download-chat.git"
+  },
+  "bugs": {
+    "url": "https://github.com/hardelele/gpt-download-chat/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test test/",
+    "icons": "node scripts/make-icons.mjs",
+    "verify": "node scripts/verify.mjs",
+    "build": "node scripts/build.mjs",
+    "zip": "node scripts/build.mjs --zip-only",
+    "screenshots": "node scripts/make-screenshots.mjs"
+  },
+  "keywords": [
+    "chrome-extension",
+    "manifest-v3",
+    "chatgpt",
+    "markdown",
+    "export"
+  ]
+}
