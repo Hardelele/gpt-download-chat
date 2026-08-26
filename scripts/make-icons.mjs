@@ -88,7 +88,30 @@ function encodePng(rgba, width, height) {
 const INK_TOP = [0x1c, 0x26, 0x33];
 const INK_BOTTOM = [0x0d, 0x12, 0x18];
 const PAPER = [0xf8, 0xfa, 0xfc];
-const AMBER = [0xf7, 0xb7, 0x33];
+
+/**
+ * CLI:
+ *   node scripts/make-icons.mjs                                  the ChatGPT set + store icon
+ *   node scripts/make-icons.mjs --dir extensions/claude          a sibling extension's set
+ *   node scripts/make-icons.mjs --dir extensions/claude --accent "#d97757"
+ *
+ * The badge and the arrow are identical across platforms on purpose — one family, one
+ * recognisable mark. Only the baseline bar is tinted, which is enough to tell the four
+ * store items apart in a toolbar without inventing four unrelated logos.
+ */
+const arg = (name, fallback) => {
+  const i = process.argv.indexOf(name);
+  return i !== -1 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
+};
+const OUT_DIR = arg('--dir', 'extension');
+
+const hexToRgb = (hex) => {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
+  if (!m) throw new Error(`--accent must be a #rrggbb colour, got "${hex}"`);
+  const n = parseInt(m[1], 16);
+  return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+};
+const AMBER = hexToRgb(arg('--accent', '#f7b733'));
 
 const BADGE_RADIUS = 0.215;
 
@@ -185,13 +208,17 @@ function render(size, ss = 4) {
  * Main
  * ------------------------------------------------------------------ */
 
+const iconsDir = join(ROOT, ...OUT_DIR.split(/[\\/]/), 'icons');
 const TARGETS = [
-  { size: 16, path: join(ROOT, 'extension', 'icons', 'icon16.png'), ss: 8 },
-  { size: 32, path: join(ROOT, 'extension', 'icons', 'icon32.png'), ss: 8 },
-  { size: 48, path: join(ROOT, 'extension', 'icons', 'icon48.png'), ss: 6 },
-  { size: 128, path: join(ROOT, 'extension', 'icons', 'icon128.png'), ss: 4 },
-  { size: 512, path: join(ROOT, 'store', 'assets', 'icon512.png'), ss: 3 },
+  { size: 16, path: join(iconsDir, 'icon16.png'), ss: 8 },
+  { size: 32, path: join(iconsDir, 'icon32.png'), ss: 8 },
+  { size: 48, path: join(iconsDir, 'icon48.png'), ss: 6 },
+  { size: 128, path: join(iconsDir, 'icon128.png'), ss: 4 },
 ];
+// The 512px listing asset only belongs to the primary build.
+if (OUT_DIR === 'extension') {
+  TARGETS.push({ size: 512, path: join(ROOT, 'store', 'assets', 'icon512.png'), ss: 3 });
+}
 
 let failed = false;
 for (const { size, path, ss } of TARGETS) {

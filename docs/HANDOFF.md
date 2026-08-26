@@ -583,3 +583,124 @@ The **DOM fallback** remains the only untested-against-reality path — which no
 since Delta 1 removed most of the reasons we would ever reach it. `/backend-api/conversations?offset=&limit=`
 returning `{items, total, limit, offset}` is noted for a future bulk-export feature; I have not
 built against it.
+## Agent C — BUILD / REPO / STORE
+
+### What I built
+
+**Icons.** `scripts/make-icons.mjs` rasterises into an RGBA buffer with supersampled
+antialiasing and encodes real PNGs using nothing but `node:zlib` — hand-written IHDR/IDAT/IEND
+chunks with a CRC32 table. No sharp, no canvas, no jimp. Output: a full-bleed rounded badge in
+deep ink with a white download arrow over an amber baseline; two colours and thick strokes so
+it survives 16px. `extension/icons/icon{16,32,48,128}.png` plus `store/assets/icon512.png`.
+All five verified to decode via .NET `System.Drawing` and inspected visually at 16px and 128px.
+Regeneration is byte-identical, so `git status` stays clean after `npm run icons`.
+
+**Build pipeline.**
+- `scripts/verify.mjs` — pre-publish gate. Manifest JSON validity, `manifest_version:3`,
+  Chrome-format version, name ≤75, description ≤132, all four icons present with correct
+  IHDR dimensions and non-trivial size, every manifest-referenced file exists, no `<all_urls>`
+  or wildcard host, no `unsafe-eval`/`unsafe-inline` CSP, and no remote-code smells
+  (`eval(`, `new Function(`, remote `<script src>`/`<link href>`, `importScripts()`/`import()`
+  from a URL) anywhere under the tree. It also flags any URL host the manifest does not
+  declare — **derived from the manifest, not hardcoded**, so it works unchanged for the
+  Claude / Gemini / AI Mode builds.
+- `scripts/build.mjs` — runs the gate, stages into `dist/`, and writes the zip by hand with
+  `zlib.deflateRawSync` + local file headers + central directory + EOCD. Stores rather than
+  deflates when deflate does not help. **`manifest.json` is at the archive root.** After
+  writing, it re-reads its own central directory and cross-checks the entry count against
+  .NET `System.IO.Compression`. Refuses to package if `package.json` and `manifest.json`
+  versions disagree.
+- Both take `--dir`, so `node scripts/build.mjs --dir extensions/claude` works today.
+- `.github/workflows/ci.yml` — Node 22, test → verify → build, zip uploaded as an artifact.
+
+**Store material.** `store/listing.md` (item name, short description, ~430-word detailed
+description, category, language, all dashboard field values), `store/permissions-justification.md`
+(written against B's *actual* manifest — one paragraph each for `downloads`, `activeTab`,
+`scripting`, `storage` and the two hosts, plus the single-purpose statement, the full
+data-usage table and the Limited Use disclosure), `store/checklist.md` (ordered human
+submission steps and what actually delays review), `PRIVACY.md`, and three 1280×800
+screenshots.
+
+**Repo.** `README.md`, `LICENSE` (MIT © 2026 Hardelele), `CHANGELOG.md` (Keep a Changelog),
+`.gitignore`, `.gitattributes`.
+
+### Two things I found and fixed that were not in my brief
+
+1. **`npm test` was specified as `node --test test/` — that is broken on Node 22.** A bare
+   directory argument is resolved as a *module*, so it fails with
+   `Cannot find module '...\test'` and zero tests run. Bare `node --test` discovers everything
+   correctly (251 tests). `package.json` now uses the bare form. Worth knowing before anyone
+   "fixes" it back.
+2. **`0o100644 << 16` overflows to a negative int32 in JS**, which made `writeUInt32LE` throw
+   while writing ZIP external file attributes. Needs `>>> 0`.
+
+### Reported to Agent B (now fixed by B)
+
+`popup.css` had `#pane-loading { display: flex }` with no author-level `[hidden]` rule.
+Author rules beat the UA stylesheet's `[hidden] { display: none }` regardless of specificity,
+so setting `hidden` on the loading pane did not hide it and two panes rendered at once.
+Caught while screenshotting the real popup. B has landed `[hidden] { display: none }`;
+screenshots have been re-rendered against the fixed CSS.
+
+### Screenshots — how they are made, and why that matters
+
+`scripts/make-screenshots.mjs` does not mock the product. It reads the real
+`popup.html` body and the real `popup.css` (scoped to a `.popup` container, with the
+dark-mode media query stripped so the render is reproducible), drives it into the "ready"
+state, and renders it with headless Chrome at exactly 1280×800. The Markdown shown beside it
+is the genuine output of B's `toMarkdown()` and the filename is the genuine output of
+`buildFilename()`, run over a sample conversation defined in the script. The slice shown in
+shot 2 is located by searching the rendered output for the table, not by a fixed line offset,
+so the caption cannot drift away from the pixels. Dimensions are asserted from the PNG IHDR
+after rendering; the script exits non-zero if they are not 1280×800.
+
+Chrome was found at `C:\Program Files\Google\Chrome\Application\chrome.exe`. If it is ever
+absent the script still writes the HTML sources to `store/assets/src/` and says so rather
+than shipping a fake.
+
+### Status of the sibling builds (D / E / F) — for the orchestrator
+
+I ran my gate against all three trees. Every one fails on **exactly the shared files that
+have not been hoisted yet**, and on nothing else:
+
+```
+extensions/{claude,gemini,aimode}:
+  icons/icon{16,32,48,128}.png     missing
+  src/popup/popup.html             missing
+  src/background.js                missing
+```
+
+Their manifests themselves are fine. So the hoist is the only blocker, as D/E/F reported.
+
+I did **not** write into `extensions/**` — the addendum puts those trees outside my ownership.
+Instead `scripts/make-icons.mjs` now takes `--dir` and `--accent`, so producing a per-platform
+icon set is one command each, e.g.:
+
+```
+node scripts/make-icons.mjs --dir extensions/claude --accent "#d97757"
+node scripts/make-icons.mjs --dir extensions/gemini --accent "#4285f4"
+node scripts/make-icons.mjs --dir extensions/aimode --accent "#34a853"
+```
+
+Badge and arrow stay identical across all four — one family, one recognisable mark — and only
+the baseline bar is tinted, which is enough to tell them apart in a toolbar. Whoever owns the
+hoist should run those three lines and then `node scripts/verify.mjs --dir extensions/<p>`.
+
+### What I assumed
+
+- The store item name and short description are taken from `manifest.json` rather than typed
+  into the dashboard. If B changes either, `store/listing.md` must change in the same commit.
+- The privacy policy is served from `docs/` via GitHub Pages at
+  `https://hardelele.github.io/gpt-download-chat/privacy.html`. **Pages is not enabled yet** —
+  a human must switch it on (Settings → Pages → main / `/docs`) *before* submitting, because
+  the reviewer opens that URL and a 404 is an instant rejection. `docs/.nojekyll` is committed.
+- The one policy URL covers all four store items; the policy text is written to be
+  platform-neutral about which assistant is being exported.
+
+### What is left
+
+- Enabling GitHub Pages, the $5 developer account, and the upload itself — human-only, all
+  spelled out in `store/checklist.md`.
+- Optional promo tiles (440×280, 1400×560). Not generated; only needed for store featuring.
+- `dist/` is gitignored by design — CI publishes the zip as a build artifact.
+
