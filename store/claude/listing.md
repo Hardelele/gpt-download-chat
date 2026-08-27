@@ -66,18 +66,19 @@ There is a Share button, which publishes a public link rather than giving you a 
 
 The obvious workaround does not work either. Selecting a long Claude thread and pressing Ctrl+C loses material, because the interface only keeps part of a long conversation in the page at any moment. And whatever you do capture arrives flattened: code fences lose their language tag, tables collapse into runs of text, nested lists lose their indentation.
 
-Artifacts make it worse. The document, the script or the component built for you lives in a side panel, outside the transcript. Copy the chat and the artifact is simply not in it — which is usually the single most valuable thing in the conversation. Chat2MD folds every revision of an artifact back into its final version and drops it into the file, in place, as a fenced code block.
+Generated files and artifacts make it worse. The document, the script or the component built for you lives in a side panel, outside the transcript. Copy the chat and it is simply not in there — and it is usually the single most valuable thing in the conversation. Chat2MD puts written files and artifacts into the Markdown, in place, as fenced code blocks labelled with their path and language.
 
 WHAT YOU GET
 
 • The complete conversation, from the first message to the last — not just the part scrolled into view.
-• Artifacts included in the file, in place, as fenced code blocks that keep their title and their language.
+• Files and artifacts the assistant produced, included in place, as fenced code blocks that keep their path or title and their language.
+• Tool work kept legible when you want it: searches show what was searched for, shell steps show the command and its output, and failures are marked as failures. Off by default, one checkbox to include.
 • Fenced code blocks that keep their language, so syntax highlighting still works when you paste the file into your editor, your notes app or a pull request.
 • Tables, nested lists, block quotes, links and inline formatting preserved as Markdown.
 • The active branch. If you edited a message or asked Claude to try again, you get the version you kept, not a scrambled merge of every attempt.
 • A YAML front-matter block with the conversation title, source URL, model and dates — so the file drops straight into Obsidian, Logseq, Quartz, Hugo or Jekyll without editing.
 • A sensible, filesystem-safe filename derived from the chat title.
-• Optional extras you can switch on: per-message timestamps, tool calls, and Claude's extended thinking.
+• Optional extras you can switch on: per-message timestamps, tool and web-search steps, and extended thinking.
 
 WHO IT IS FOR
 
@@ -250,5 +251,5 @@ At least one screenshot is mandatory; up to five are allowed. Screenshots must b
 Burned into the screenshot images themselves (the store does not render separate captions):
 
 1. *"claude.ai cannot download one chat. This can."*
-2. *"Artifacts land in the file, in place, with their language."*
+2. *"Files and artifacts land in the Markdown, in place, with their language."*
 3. *"The whole thread — including the branch you actually kept."*

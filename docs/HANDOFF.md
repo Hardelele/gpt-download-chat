@@ -1000,3 +1000,97 @@ than selector order.
    Anything unrecognised is currently counted as an unknown role and warned about, not guessed.
 4. Real-world timing: `waitMs` 220 with 80 rewind rounds plus a sweep is up to ~40 s on a very
    long chat. Acceptable for a fallback that now rarely runs, but untuned against a real network.
+
+### Agent D — addendum 2: the `artifacts` tool does not exist in current data
+
+The coordinator scanned **15 live conversations with `render_all_tools=true`**. The headline
+finding invalidated the primary assumption in my brief, so this supersedes the artifact-centric
+parts of both sections above. Test count is now **103, all green**.
+
+**`render_all_tools=true` is load-bearing, and this is the most important line in this file.**
+Without it: `text` 203, `thinking` 32, **zero tool blocks** across 12 conversations. With it, the
+same account yields `tool_use` 46 and `tool_result` 45 across 15 conversations, 8 of which use
+tools. **Omitting that one query parameter silently hides half of every tool-using conversation
+and the export looks complete while being wrong.** Agents E and F: if your platform has an
+equivalent flag, find it before you trust a block-type census.
+
+**There is no `artifacts` tool.** Measured tool names and counts:
+
+```
+web_search 11 · message_compose_v1 9 · view 7 · web_fetch 6 · bash_tool 4
+conversation_search 2 · present_files 2 · ask_user_input_v0 2
+recent_chats 1 · create_file 1 · visualize:read_me 1
+```
+
+`artifacts`: 0. `input.id`: 0. `input.command`: 0. My `collectArtifacts()` replay — the most
+intricate code I own, including the `$&`-safe function replacer — **never fires on current
+data**. Per instruction it is retained as a secondary path for older conversations and its tests
+stay green, but it is no longer primary and no longer what the store copy leads with.
+
+What replaced it:
+
+- **`TOOL_SPECS`, a data-driven table** mapping tool name → how it reads. `bash_tool` becomes a
+  fenced shell block plus its output; `web_search`/`web_fetch` show the query or URL;
+  `view` shows path and line range; `present_files` a path list; `conversation_search` and
+  `recent_chats` their parameters.
+- **Unknown tools degrade, never vanish and never dump JSON.** `genericInputSummary()` emits a
+  readable key/value list, promoting long or multi-line strings to their own fenced block. A
+  tool with no input at all still gets a heading line. There is a test asserting that every one
+  of the eleven measured tool names is identifiable in its output and that none falls through to
+  a raw dump.
+- **`create_file` is first-class — it is the real "artifact" today.** `file_text` is rendered as
+  a fenced block labelled with `path`, language inferred from the extension, as
+  `contentType:'code'` with `hidden:false`, so it is **visible by default** rather than gated
+  behind `includeTools`. Its bare `ok` echo is suppressed unless the call errored.
+  `visualize:show_widget` is treated the same way.
+- **`tool_result` pairs to `tool_use` by `tool_use_id`**, indexed branch-wide via
+  `collectToolResults()`, so pairing survives a result landing in a later message; a shared
+  `consumedResults` set stops it rendering twice. Orphan results still render alone.
+- **`tool_result.content` is an ARRAY**, never a string. `text`, `knowledge` and
+  `local_resource` are all handled. `knowledge` becomes a linked source list
+  (`- [title](url)` plus the body) and is deliberately **not fenced**, since fencing would kill
+  the links. Unrecognised element types are counted into the existing unknown-block warning.
+- **`is_error`** marks the heading (`· failed`) and the result (`_Result (error):_`).
+- **`integration_name` / `is_mcp_app` / `tool_origin`**: MCP and integration tools are labelled
+  `Integration · tool_name` with a `· MCP` marker, and `authorName` prefers `integration_name`.
+- **`display_content`** is used as a fallback when a tool's `input` yields nothing.
+
+Fixtures were rebuilt from the exact measured key sets, including every field the renderer does
+*not* use (`start_timestamp`, `stop_timestamp`, `message`, `integration_icon_url`, `icon_name`,
+`tool_origin`, `meta`), so the code is proven not to choke on them.
+
+Store copy was corrected too: it no longer promises "artifacts" as the headline. It now says
+files and artifacts, and adds tool legibility as a feature.
+
+**Still unverified, in order of risk:**
+
+1. **`ask_user_input_v0` and `message_compose_v1` inputs were truncated in the capture.** These
+   are the #2 and #8 most common tools, so between them they are a large share of real traffic,
+   and both currently fall to the generic renderer. That is safe but not good. If anyone can
+   capture their full `input` shape, they deserve `TOOL_SPECS` entries — `message_compose_v1`
+   in particular almost certainly carries a message body worth rendering as prose rather than as
+   a key/value line.
+2. **`display_content`'s real shape is unknown.** I probe string, array and `{text|content|
+   markdown|title}` defensively. The coordinator's note that it "is likely the user-visible
+   rendering Claude itself shows" suggests it may be *better* than anything I derive from
+   `input` — if its shape gets measured, it may deserve to be preferred rather than used as a
+   fallback.
+3. **`local_resource`'s field names are guessed** (`name|title|path|uri|file_name` and
+   `text|content|description`). Only its `type` was measured.
+4. **`tool_origin` values are unknown** — I only test `is_mcp_app`/`integration_name` for
+   labelling and otherwise ignore `tool_origin`.
+5. Everything in my earlier "still unverified" list that was not about tools still stands:
+   attachment URL field spellings, pagination, and the DOM fallback selectors.
+
+Unchanged from before, and worth repeating because it now matters more: **if the API path ever
+fails, tool traffic and generated files are lost entirely** — none of it exists in the DOM in a
+recoverable form, and React artifacts render in a cross-origin `claudeusercontent.com` iframe an
+extension cannot read. The DOM fallback produces prose only, and says so in `warnings[]`.
+
+**Import note re: the `shared/` hoist** — `shared/lib/` currently holds `markdown.js` and
+`filename.js`. `html2md.js` is still at `extension/src/lib/html2md.js`, and
+`extensions/claude/src/lib/dom-scrape.js` still imports it from there, exactly like
+`extensions/aimode` and `extensions/gemini` do. Nothing of mine is broken. When html2md moves,
+that one line is the only change needed on my side. `verify.mjs --dir extensions/claude` remains
+at 2 errors, both the shared shell files (`src/popup/popup.html`, `src/background.js`) that I
+must not write.
