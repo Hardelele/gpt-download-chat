@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Chat2MD — a Chrome MV3 extension that saves a full ChatGPT conversation as a Markdown file.",
+  "description": "Chat2MD — Chrome MV3 extensions that save a full AI chat as a Markdown file. One shared shell, four store items (see platforms.config.mjs).",
   "license": "MIT",
   "author": "Hardelele",
   "homepage": "https://github.com/hardelele/gpt-download-chat",
@@ -22,6 +22,8 @@
     "icons": "node scripts/make-icons.mjs",
     "verify": "node scripts/verify.mjs",
     "build": "node scripts/build.mjs",
+    "build:one": "node scripts/build.mjs --platform",
+    "platforms": "node scripts/build.mjs --list",
     "zip": "node scripts/build.mjs --zip-only",
     "screenshots": "node scripts/make-screenshots.mjs"
   },
@@ -29,6 +31,8 @@
     "chrome-extension",
     "manifest-v3",
     "chatgpt",
+    "claude",
+    "gemini",
     "markdown",
     "export"
   ]

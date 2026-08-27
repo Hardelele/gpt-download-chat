@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Chat2MD for Gemini — Save chats as Markdown",
+  "name": "Chat2MD for Gemini™ — Save chats as Markdown",
   "version": "0.1.0",
   "description": "Export any Gemini or AI Studio chat to a clean Markdown file. Code blocks and tables survive. Runs entirely on your machine.",
   "icons": {
@@ -23,12 +23,25 @@
     "service_worker": "src/background.js",
     "type": "module"
   },
-  "permissions": ["downloads", "activeTab", "scripting", "storage"],
-  "host_permissions": ["https://gemini.google.com/*", "https://aistudio.google.com/*"],
+  "permissions": [
+    "downloads",
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://gemini.google.com/*",
+    "https://aistudio.google.com/*"
+  ],
   "web_accessible_resources": [
     {
-      "resources": ["src/lib/*.js"],
-      "matches": ["https://gemini.google.com/*", "https://aistudio.google.com/*"]
+      "resources": [
+        "src/lib/*.js"
+      ],
+      "matches": [
+        "https://gemini.google.com/*",
+        "https://aistudio.google.com/*"
+      ]
     }
   ],
   "content_security_policy": {

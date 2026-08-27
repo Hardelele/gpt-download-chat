@@ -23,12 +23,23 @@
     "service_worker": "src/background.js",
     "type": "module"
   },
-  "permissions": ["downloads", "activeTab", "scripting", "storage"],
-  "host_permissions": ["https://claude.ai/*"],
+  "permissions": [
+    "downloads",
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://claude.ai/*"
+  ],
   "web_accessible_resources": [
     {
-      "resources": ["src/lib/*.js"],
-      "matches": ["https://claude.ai/*"]
+      "resources": [
+        "src/lib/*.js"
+      ],
+      "matches": [
+        "https://claude.ai/*"
+      ]
     }
   ],
   "content_security_policy": {

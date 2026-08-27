@@ -41,6 +41,7 @@ export const PRODUCT = 'Chat2MD';
  * @property {string}   description     manifest + store short description, <=132 chars
  * @property {string[]} hostPermissions manifest `host_permissions`
  * @property {string[]} webAccessibleMatches  who may pull `src/lib/*.js`
+ * @property {string}   sourceDir       the item's tree in git; owns `manifest.json`
  * @property {string}   extractorDir    directory whose contents become `src/lib/`
  * @property {string}   extractorEntry  the module `content.js` dynamically imports
  * @property {string}   assistantLabel  heading label inside the exported Markdown
@@ -62,6 +63,7 @@ export const PLATFORMS = [
       'Export any ChatGPT conversation to a clean Markdown file. Code blocks, tables and LaTeX survive. Runs entirely on your machine.',
     hostPermissions: ['https://chatgpt.com/*', 'https://chat.openai.com/*'],
     webAccessibleMatches: ['https://chatgpt.com/*', 'https://chat.openai.com/*'],
+    sourceDir: 'extension',
     extractorDir: 'extension/src/lib',
     extractorEntry: 'src/lib/extract.js',
     assistantLabel: 'ChatGPT',
@@ -91,6 +93,7 @@ export const PLATFORMS = [
       'Works with claude.ai. Save a conversation as a clean Markdown file — code, artifacts and tables survive. Runs on your machine.',
     hostPermissions: ['https://claude.ai/*'],
     webAccessibleMatches: ['https://claude.ai/*'],
+    sourceDir: 'extensions/claude',
     extractorDir: 'extensions/claude/src/lib',
     extractorEntry: 'src/lib/extract.js',
     assistantLabel: 'Claude',
@@ -123,6 +126,7 @@ export const PLATFORMS = [
       'Export any Gemini or AI Studio chat to a clean Markdown file. Code blocks and tables survive. Runs entirely on your machine.',
     hostPermissions: ['https://gemini.google.com/*', 'https://aistudio.google.com/*'],
     webAccessibleMatches: ['https://gemini.google.com/*', 'https://aistudio.google.com/*'],
+    sourceDir: 'extensions/gemini',
     extractorDir: 'extensions/gemini/src/lib',
     extractorEntry: 'src/lib/extract.js',
     assistantLabel: 'Gemini',
@@ -154,6 +158,7 @@ export const PLATFORMS = [
       'Save an AI Mode answer thread from Google Search™ as a Markdown file, with every inline citation and source link kept.',
     hostPermissions: ['https://www.google.com/search*', 'https://www.google.com/ai*'],
     webAccessibleMatches: ['https://www.google.com/*'],
+    sourceDir: 'extensions/aimode',
     extractorDir: 'extensions/aimode/src/lib',
     extractorEntry: 'src/lib/extract.js',
     assistantLabel: 'AI Mode',

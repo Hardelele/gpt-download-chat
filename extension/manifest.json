@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Chat2MD — Save ChatGPT chats as Markdown",
+  "name": "Chat2MD — Save AI chats as Markdown",
   "version": "0.1.0",
   "description": "Export any ChatGPT conversation to a clean Markdown file. Code blocks, tables and LaTeX survive. Runs entirely on your machine.",
   "icons": {
@@ -23,12 +23,25 @@
     "service_worker": "src/background.js",
     "type": "module"
   },
-  "permissions": ["downloads", "activeTab", "scripting", "storage"],
-  "host_permissions": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
+  "permissions": [
+    "downloads",
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*"
+  ],
   "web_accessible_resources": [
     {
-      "resources": ["src/lib/*.js"],
-      "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"]
+      "resources": [
+        "src/lib/*.js"
+      ],
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*"
+      ]
     }
   ],
   "content_security_policy": {

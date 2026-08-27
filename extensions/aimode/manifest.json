@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Chat2MD for AI Mode — Save AI answers as Markdown",
+  "name": "Chat2MD for AI Mode™ — Save AI answers as Markdown",
   "version": "0.1.0",
   "description": "Save an AI Mode answer thread from Google Search™ as a Markdown file, with every inline citation and source link kept.",
   "icons": {
@@ -10,7 +10,7 @@
     "128": "icons/icon128.png"
   },
   "action": {
-    "default_title": "Save this AI Mode thread as Markdown",
+    "default_title": "Save this chat as Markdown",
     "default_popup": "src/popup/popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
@@ -23,15 +23,24 @@
     "service_worker": "src/background.js",
     "type": "module"
   },
-  "permissions": ["downloads", "activeTab", "scripting"],
+  "permissions": [
+    "downloads",
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
   "host_permissions": [
     "https://www.google.com/search*",
     "https://www.google.com/ai*"
   ],
   "web_accessible_resources": [
     {
-      "resources": ["src/lib/*.js"],
-      "matches": ["https://www.google.com/*"]
+      "resources": [
+        "src/lib/*.js"
+      ],
+      "matches": [
+        "https://www.google.com/*"
+      ]
     }
   ],
   "content_security_policy": {

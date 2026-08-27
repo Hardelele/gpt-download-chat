@@ -28,20 +28,21 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: Verify (store pre-publish gate)
-        run: npm run verify
-
-      - name: Build
+      # Composes all four store items and runs scripts/verify.mjs against each
+      # staged package before zipping it, so there is no separate verify step:
+      # verifying the source trees would be meaningless now that the shell lives
+      # in shared/ and is only assembled at build time.
+      - name: Build + verify all four packages
         run: npm run build
 
-      - name: Read extension version
+      - name: Read version
         id: ver
-        run: echo "version=$(node -p "require('./extension/manifest.json').version")" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
-      - name: Upload extension zip
+      - name: Upload store packages
         uses: actions/upload-artifact@v4
         with:
-          name: chat2md-${{ steps.ver.outputs.version }}
-          path: dist/chat2md-${{ steps.ver.outputs.version }}.zip
+          name: chat2md-packages-${{ steps.ver.outputs.version }}
+          path: dist/*.zip
           if-no-files-found: error
           retention-days: 30
