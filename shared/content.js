@@ -1,5 +1,5 @@
 /**
- * content.js — the bridge between the popup and Agent A's extractor.
+ * content.js — the bridge between the popup and the platform's extractor.
  *
  * Injected on demand by the popup via `chrome.scripting.executeScript({files})`,
  * which means it is a CLASSIC script: it may not use top-level `import`.
@@ -21,11 +21,14 @@
 
   function loadExtractor() {
     if (!modulePromise) {
+      // Classic script: no top-level import, and no way to read platform.js
+      // either. The extractor entry point is the same relative path in every
+      // build (see `extractorEntry` in platforms.config.mjs), so it is literal.
       modulePromise = import(chrome.runtime.getURL('src/lib/extract.js')).catch((err) => {
         modulePromise = null; // let the next attempt retry
         throw new Error(
           `Could not load the extractor module (${describe(err)}). `
-            + 'Try reloading the ChatGPT tab.',
+            + 'Try reloading the page.',
         );
       });
     }

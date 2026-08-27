@@ -14,6 +14,7 @@
 
 import { toMarkdown } from './lib/markdown.js';
 import { buildFilename } from './lib/filename.js';
+import { PLATFORM } from './platform.js';
 
 const MIME = 'text/markdown;charset=utf-8';
 
@@ -23,7 +24,14 @@ export function handleMessage(message, _sender, sendResponse) {
   (async () => {
     try {
       const { conversation, options } = message;
-      const markdown = toMarkdown(conversation, options);
+      // Platform defaults first, the popup's explicit choices second — so a
+      // download triggered before the popup ever wrote its options still gets
+      // the right assistant heading for this build.
+      const markdown = toMarkdown(conversation, {
+        userLabel: PLATFORM.userLabel,
+        assistantLabel: PLATFORM.assistantLabel,
+        ...(options || {}),
+      });
       const filename = buildFilename(conversation);
       const downloadId = await chrome.downloads.download({
         url: toDataUrl(markdown),

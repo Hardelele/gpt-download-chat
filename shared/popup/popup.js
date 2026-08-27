@@ -2,8 +2,13 @@
  * popup.js — the whole UI. Loaded as an ES module, so it can import the renderer
  * directly for the "copy to clipboard" path.
  *
+ * Platform-agnostic: everything that differs between the four store items —
+ * which hosts count, which URLs are a conversation, what the assistant is
+ * called in the exported file — comes from the generated `platform.js`
+ * (see platforms.config.mjs). There is no site name hardcoded below.
+ *
  * Flow:
- *   1. find the active tab and decide whether it is a ChatGPT conversation
+ *   1. find the active tab and decide whether it is a conversation
  *   2. inject `src/content.js` (idempotent) using the `activeTab` grant that the
  *      user's click on the toolbar icon just handed us
  *   3. ask it for a Conversation, render title / count / warnings
@@ -13,9 +18,9 @@
 
 import { toMarkdown, DEFAULT_OPTIONS } from '../lib/markdown.js';
 import { buildFilename } from '../lib/filename.js';
+import { PLATFORM, CONVERSATION_URL } from '../platform.js';
 
-const CHAT_HOSTS = new Set(['chatgpt.com', 'chat.openai.com']);
-const CONVERSATION_PATH = /^\/(?:c\/|share\/|g\/[^/]+\/c\/)/;
+const CHAT_HOSTS = new Set(PLATFORM.hosts);
 const STORAGE_KEY = 'renderOptions';
 
 const OPTION_IDS = [
@@ -61,7 +66,7 @@ async function start() {
   try {
     const tab = await activeTab();
     if (!tab || typeof tab.id !== 'number') {
-      return showIdle('No active tab', 'Open a ChatGPT conversation and try again.');
+      return showIdle('No active tab', `Open a ${PLATFORM.siteName} conversation and try again.`);
     }
     const verdict = classify(tab.url || tab.pendingUrl || '');
     if (verdict !== 'conversation') {
@@ -71,7 +76,7 @@ async function start() {
     await injectContentScript(tab.id);
     const reply = await sendToTab(tab.id, { type: 'chat2md:extract' });
 
-    if (!reply) throw new Error('The ChatGPT tab did not answer. Reload it and try again.');
+    if (!reply) throw new Error(`The ${PLATFORM.siteName} tab did not answer. Reload it and try again.`);
     if (!reply.ok) throw new Error(reply.error || 'Extraction failed.');
 
     conversation = reply.conversation;
@@ -99,18 +104,15 @@ function classify(rawUrl) {
     return 'elsewhere';
   }
   if (url.protocol !== 'https:' || !CHAT_HOSTS.has(url.hostname)) return 'elsewhere';
-  return CONVERSATION_PATH.test(url.pathname) ? 'conversation' : 'new-chat';
+  // Matched against path AND query: on AI Mode the discriminator is `?udm=50`,
+  // not the path, so a path-only test would reject every valid page.
+  const target = url.pathname + url.search;
+  return CONVERSATION_URL.some((re) => re.test(target)) ? 'conversation' : 'new-chat';
 }
 
 const IDLE_COPY = {
-  elsewhere: [
-    'Not a ChatGPT conversation',
-    'Open a chat on <b>chatgpt.com</b>, then click the Chat2MD icon again.',
-  ],
-  'new-chat': [
-    'No conversation open yet',
-    'This looks like a new chat. Send a message first — Chat2MD exports saved conversations.',
-  ],
+  elsewhere: PLATFORM.idle.elsewhere,
+  'new-chat': PLATFORM.idle.newChat,
 };
 
 async function injectContentScript(id) {
@@ -118,8 +120,8 @@ async function injectContentScript(id) {
     await chrome.scripting.executeScript({ target: { tabId: id }, files: ['src/content.js'] });
   } catch (err) {
     throw new Error(
-      `Chat2MD could not attach to the page (${String((err && err.message) || err)}). `
-        + 'Reload the ChatGPT tab and try again.',
+      `${PLATFORM.productName} could not attach to the page (${String((err && err.message) || err)}). `
+        + `Reload the ${PLATFORM.siteName} tab and try again.`,
     );
   }
 }
@@ -164,7 +166,7 @@ function showError(text) {
 }
 
 function renderReady(c) {
-  el('chat-title').textContent = c.title || 'ChatGPT conversation';
+  el('chat-title').textContent = c.title || PLATFORM.fallbackTitle;
   el('chat-meta').textContent = metaLine(c);
 
   const warnings = Array.isArray(c.warnings) ? c.warnings.filter(Boolean) : [];
@@ -230,7 +232,13 @@ function optionInput(key) {
 }
 
 function currentOptions() {
-  const o = { ...DEFAULT_OPTIONS };
+  // The renderer defaults to `assistantLabel: 'ChatGPT'`; every build overrides
+  // it here so a Gemini export says "## Gemini" and not "## ChatGPT".
+  const o = {
+    ...DEFAULT_OPTIONS,
+    userLabel: PLATFORM.userLabel,
+    assistantLabel: PLATFORM.assistantLabel,
+  };
   for (const key of OPTION_IDS) {
     const input = optionInput(key);
     if (!input) continue;
