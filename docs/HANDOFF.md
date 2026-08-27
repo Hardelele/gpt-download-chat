@@ -1176,3 +1176,179 @@ works through an IntersectionObserver, and both real `WheelEvent`s and `scrollTo
 either of which fires an IO in a real browser — left `scrollHeight` at 4037. If it were the
 transcript's loader, something would have moved. Worth one look with the sidebar collapsed if
 anyone is in there anyway, but I would not spend budget on it.
+
+---
+
+## Orchestrator / INTEGRATION — the four-package build
+
+`npm run build` now produces four verify-clean Chrome Web Store zips. Nothing else about the
+project changed: no extractor was refactored, no module was renamed for taste.
+
+```
+dist/chat2md-chatgpt-0.1.0.zip   46647 bytes   17 entries
+dist/chat2md-claude-0.1.0.zip    50025 bytes   17 entries
+dist/chat2md-gemini-0.1.0.zip    43916 bytes   18 entries
+dist/chat2md-aimode-0.1.0.zip    41281 bytes   15 entries
+```
+
+`manifest.json` is the **first** central-directory entry of every archive, and each zip is
+cross-checked against `System.IO.Compression` after it is written.
+
+### Final layout
+
+```
+platforms.config.mjs        the platform table — one row per store item
+shared/                     everything identical across all four (Agent B's shell)
+  background.js  content.js
+  platform.js               GENERATED; the checked-in copy is the ChatGPT one
+  popup/{popup.html,popup.css,popup.js}
+  lib/{markdown.js,filename.js}
+extension/                  ChatGPT: manifest + icons + src/lib/{api-client,dom-scrape,html2md,extract}.js
+extensions/{claude,gemini,aimode}/   the same shape, extractor only
+scripts/build.mjs           composes, verifies and packages each row of the table
+```
+
+Composed package (identical shape for all four):
+
+```
+dist/<outputName>-<version>/
+  manifest.json                       generated   <- ZIP ROOT
+  icons/icon{16,32,48,128}.png        generated, tinted per platform
+  src/background.js src/content.js src/popup/**   from shared/
+  src/platform.js                     generated
+  src/lib/{markdown.js,filename.js}   from shared/lib/
+  src/lib/html2md.js                  copied from extension/src/lib/
+  src/lib/*                           that platform's extractor
+```
+
+### What moved, and what deliberately did not
+
+**Moved into `shared/`** (Agent B's, and finished): `markdown.js`, `filename.js`, `content.js`,
+`background.js`, `popup/**`. `shared/` mirrors the old `extension/src/` layout on purpose, so
+every relative import *inside* the shell (`./lib/markdown.js`, `../lib/filename.js`) resolved
+unchanged. The only importers that needed editing were `test/markdown.test.mjs` and
+`scripts/make-screenshots.mjs`.
+
+**Left alone**: Agent A's `api-client.js`, `dom-scrape.js`, `html2md.js` and `extract.js` stay
+under `extension/src/lib/`. The build copies `html2md.js` into every package. Giving those four
+a tidier home is a later job; doing it now would have collided with two live agents.
+
+### The cross-tree `html2md.js` import
+
+`extensions/{claude,gemini,aimode}` import it as `../../../../extension/src/lib/html2md.js`,
+which is correct for `node --test` but reaches outside the package. `normaliseImports()` in
+`scripts/build.mjs` rewrites that specifier to `./html2md.js` **while staging**, so the source
+tree stays runnable and the package stays self-contained. The build prints how many specifiers
+it rewrote per platform (1 each for Claude/Gemini/AI Mode, 0 for ChatGPT). No extractor source
+was edited. D/E/F: you do not have to change that import line.
+
+### `assistantLabel` — fixed (Agents D, E and F all reported this)
+
+The shell learns which product it is inside from a generated `src/platform.js`. The popup seeds
+`userLabel`/`assistantLabel` from it, and `background.js` applies them *underneath* whatever the
+popup sent, so a download still gets the right heading if the popup never persisted options.
+Verified against the actual staged packages:
+
+```
+chatgpt  -> ## You | ## ChatGPT
+claude   -> ## You | ## Claude
+gemini   -> ## You | ## Gemini
+aimode   -> ## You | ## AI Mode
+```
+
+The same mechanism removed the last hardcoded ChatGPT strings from the popup: host list,
+conversation-URL patterns, idle copy and the fallback title. **The URL patterns are matched
+against `pathname + search`, not `pathname`** — AI Mode's discriminator is `?udm=50`, so a
+path-only test (what the original `CONVERSATION_PATH` did) would have rejected every valid
+AI Mode page.
+
+`DEFAULT_OPTIONS` in `markdown.js` is untouched: it still says `assistantLabel: 'ChatGPT'`,
+which is what `CONTRACT.md` section 3 specifies and what `test/markdown.test.mjs` asserts.
+
+### `storage`
+
+All four manifests request `downloads`, `activeTab`, `scripting`, `storage`. Agent F was right
+to flag it and right to ask rather than guess: the shared popup calls `chrome.storage.sync.get`
+on open, so an item without the permission would ship a popup that throws. Agent F's
+`store/aimode/listing.md` said *"`storage` is **not** requested by this item"* — that note is now
+corrected and the permission table gained the row. A justification that denies a permission the
+manifest requests is the same review-delay class as the reverse.
+
+Also fixed: `store/permissions-justification.md` (ChatGPT) said `chrome.storage.local` where the
+popup uses `chrome.storage.sync`.
+
+### Names
+
+One rule: our brand leads, and a third-party mark appears in the *name* only where that owner
+blesses the construction.
+
+| id | before | after |
+| --- | --- | --- |
+| chatgpt | Chat2MD — Save ChatGPT chats as Markdown | **Chat2MD — Save AI chats as Markdown** |
+| claude | Chat2MD — AI Chat to Markdown | unchanged (Agent D got there first) |
+| gemini | Chat2MD for Gemini — Save chats as Markdown | **Chat2MD for Gemini™ — …** |
+| aimode | Chat2MD for AI Mode — Save AI answers as Markdown | **Chat2MD for AI Mode™ — …** |
+
+OpenAI's guidelines say not to build their marks into a product name, and Anthropic grants no
+carve-out, so ChatGPT and Claude appear only in the description. Google *does* bless
+"… for Gemini™" with an attribution, so the two Google items keep their marks — with ™, never ®.
+Added the missing TRADEMARKS non-affiliation paragraph to the ChatGPT and Gemini detailed
+descriptions (Claude and AI Mode already had one). `store/checklist.md` item 6 was rewritten;
+it previously argued *for* keeping "ChatGPT" in the name.
+
+### Two things that can no longer drift
+
+1. Each item's `manifest.json` is **generated** and written back into its source tree on every
+   build. Edit `platforms.config.mjs`, never the manifest — your edit will be overwritten.
+   Version comes from `package.json`, so the old "bump both or the build refuses" step is gone.
+2. `build.mjs` parses each `store/**/listing.md` for the fenced blocks under `## Item name` and
+   `## Short description` and **fails the build** if either disagrees with the config.
+
+### Build CLI
+
+```
+npm run build                 all four
+npm run build -- claude       just one   (also: node scripts/build.mjs claude)
+npm run build:one -- claude   the same, explicit
+npm run platforms             print the table
+node scripts/build.mjs --zip-only     skip the verify + listing gates
+```
+
+`--dir extensions/claude` is still accepted and maps to the `claude` row, so older notes in
+this file keep working.
+
+### Deliberately left undone
+
+- **`extension/` is not load-unpackable on its own** any more, and neither is any
+  `extensions/<id>/`. They are source trees; the loadable thing is `dist/<name>-<version>/`.
+  README's install section was updated. `npm run verify` with no `--dir` therefore fails now —
+  pass `--dir dist/chat2md-<id>-<version>`, or just run `npm run build`, which gates all four.
+- **`extension/icons/` and `extensions/claude/icons/` are now dead weight.** The build generates
+  a fresh, per-platform-tinted set into each package via Agent C's `make-icons --dir --accent`.
+  I left the checked-in PNGs alone because they belong to Agents C and D and both were live;
+  `README.md` still references `extension/icons/icon128.png` for its header image.
+- **`markdown.js`'s `FALLBACK_TITLE` is still `'ChatGPT conversation'`.** I made it an option,
+  saw it break the "DEFAULT_OPTIONS matches the contract" test, and reverted — the contract
+  fixes that option set. It only fires when an extractor returns an empty title, and all four
+  extractors supply their own fallback, so this is cosmetic. Whoever owns the next contract
+  revision should add `fallbackTitle` to section 3 and wire `PLATFORM.fallbackTitle` through;
+  the popup already uses it for its on-screen title.
+- **Permission reduction** (Agent D's note: the strongest competitor ships `claude.ai` +
+  `storage` only, saving through an in-page blob anchor instead of `chrome.downloads`). Real,
+  and it would drop `downloads` and `activeTab` from all four manifests at once now that they
+  come from one table. Out of scope here — it changes `background.js`'s download path.
+- **The ChatGPT and Claude item names are similar** ("Chat2MD — Save AI chats as Markdown" vs
+  "Chat2MD — AI Chat to Markdown"). Both are mark-free and both descriptions name their site,
+  and I did not want to churn Agent D's deliberate choice. If a reviewer reads them as
+  duplicates, change the `chatgpt` row of `platforms.config.mjs` — one edit, and the build's
+  listing gate will tell you which store file to update with it.
+- **Screenshots** for Claude / Gemini / AI Mode still need real signed-in captures (Agents D, E,
+  F all flagged this). `npm run screenshots` only produces the ChatGPT set.
+
+### Working around live agents
+
+Agent A landed a `dom-scrape.js` rewrite mid-way through, and Agent D was editing
+`extensions/claude/src/lib/api-client.js` throughout. I staged explicit paths only and never ran
+`git add -A`. At one point the full suite showed 8 failures, all in `test/claude-extract.test.mjs`
+— Agent D's in-flight work, not the hoist; the suites I touched were green throughout. Final
+state on my last run: **312 tests, 310 pass, 0 fail, 2 skipped.**
