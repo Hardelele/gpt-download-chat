@@ -4,17 +4,30 @@
  * Used only when the backend API is unreachable: logged out, a hard 401/403 that
  * even cookies cannot satisfy, or a Cloudflare interstitial.
  *
- * THE CENTRAL PROBLEM, measured on a live 101-message conversation:
- * only ~7 turns exist in the DOM at rest, and they are not contiguous
- * (turn-2, turn-4, turn-12, turn-13, …). Scrolling to the top does not fix this
- * — it unmounts the bottom of the transcript while mounting the top. There is no
- * moment at which the whole conversation is in the document, so "scroll, then
- * read" cannot work by construction.
+ * THIS PATH IS BEST-EFFORT PARTIAL RECOVERY. It is NOT a substitute for the API
+ * path on any conversation of length, and no amount of scrolling makes it one.
  *
- * So we HARVEST: sweep the scroll container from top to bottom and convert each
- * turn to Markdown at the moment it is mounted, keyed by `data-turn-id`, then
- * reassemble in turn-index order. Whatever we still miss is reported loudly —
- * a silently truncated export is the single worst failure mode in this category.
+ * Measured on a live 101-message conversation (active branch = 101):
+ *   harvested unique turns : 7        (never varied at any scroll position)
+ *   scrollHeight           : 4037     (CONSTANT throughout)
+ *   turn indices captured  : 2,4,12,13,14,15,16   (gaps: 3,5,6–11)
+ * Then, trying harder: 25 real WheelEvents up + scrollTop decrements → still 7
+ * turns, still 4037. 10 PageUp KeyboardEvents → still 7 turns, still 4037.
+ *
+ * So on this build **scrolling up does not load older turns at all**. The other
+ * ~94 messages are not merely unmounted — they were never fetched into the page.
+ * There is nothing to harvest and no client-side trick that changes that.
+ *
+ * Two consequences shape this file:
+ *  1. We still HARVEST rather than snapshot — sweeping the container and
+ *     converting each turn while it is mounted, keyed by `data-turn-id`. That is
+ *     strictly better than one read, costs little, and pays off on builds (and
+ *     share pages) that DO page content in. It is not expected to complete a
+ *     long chat on chatgpt.com.
+ *  2. Completeness is REPORTED, never claimed. A file that looks whole but holds
+ *     7 % of a conversation is the worst outcome in this category, so anything
+ *     short of demonstrably complete is marked with INCOMPLETE_PREFIX in
+ *     `warnings[]`, and we never state a total we cannot know.
  *
  * Pure helpers are exported separately from the browser-touching entry points so
  * they can be unit-tested; nothing here touches `document` at module load time.
@@ -325,16 +338,18 @@ function setScrollTop(container, value) {
 }
 
 /**
- * Phase 1: rewind to the top, letting ChatGPT page older history in.
+ * Phase 1: rewind to the top, in case this build pages older history in.
  *
- * Two different stall conditions are checked, because they are genuinely
- * different failures: the turn count can stop growing while the container is
- * still scrolling (mid-load), and the scroll position can freeze while turns
- * keep arriving.
+ * Three stall conditions are tracked, because they are genuinely different:
+ * the turn count can stop growing while the container is still scrolling
+ * (mid-load); the scroll position can freeze while turns keep arriving; and —
+ * the case measured on live ChatGPT — the container's `scrollHeight` can simply
+ * never change, which means the page is not loading anything and never will.
+ * That last one is detected early so we stop wasting the user's time.
  *
  * @param {Document} doc
  * @param {{maxIterations?:number, waitMs?:number, warnings?:string[], onCapture?:Function}} [opts]
- * @returns {Promise<{turns:number, iterations:number, hitCap:boolean}>}
+ * @returns {Promise<{turns:number, iterations:number, hitCap:boolean, pagedIn:boolean}>}
  */
 export async function loadFullTranscript(doc, opts = {}) {
   const maxIterations = opts.maxIterations == null ? 80 : opts.maxIterations;
@@ -347,14 +362,18 @@ export async function loadFullTranscript(doc, opts = {}) {
     warnings.push('DOM fallback: could not find the transcript scroll container; '
       + 'only the messages already on screen were read.');
     onCapture();
-    return { turns: collectTurns(doc).length, iterations: 0, hitCap: false };
+    return { turns: collectTurns(doc).length, iterations: 0, hitCap: false, pagedIn: false };
   }
 
   let lastCount = collectTurns(doc).length;
   let lastTop = Number(container.scrollTop) || 0;
+  let lastHeight = Number(container.scrollHeight) || 0;
+  const startHeight = lastHeight;
+  const startCount = lastCount;
   let stable = 0;
   let iterations = 0;
   let hitCap = false;
+  let pagedIn = false;
 
   onCapture();
   for (; iterations < maxIterations; iterations++) {
@@ -364,8 +383,10 @@ export async function loadFullTranscript(doc, opts = {}) {
 
     const count = collectTurns(doc).length;
     const top = Number(container.scrollTop) || 0;
+    const height = Number(container.scrollHeight) || 0;
     const grew = count !== lastCount;
     const moved = top !== lastTop;
+    if (height > lastHeight || count > startCount) pagedIn = true;
 
     if (!grew && !moved) {
       stable += 1;
@@ -374,8 +395,16 @@ export async function loadFullTranscript(doc, opts = {}) {
     } else {
       stable = 0;
     }
+
+    // Measured on live ChatGPT: neither the height nor the turn count ever
+    // moves, because the page simply does not fetch older messages. Once that is
+    // clear, more rounds cannot help — stop rather than burn seconds proving it.
+    if (iterations >= 4 && !pagedIn
+      && height === startHeight && count === startCount && top <= 1) break;
+
     lastCount = count;
     lastTop = top;
+    lastHeight = height;
   }
 
   if (iterations >= maxIterations) {
@@ -390,7 +419,7 @@ export async function loadFullTranscript(doc, opts = {}) {
       + 'so early messages may be missing.');
   }
 
-  return { turns: collectTurns(doc).length, iterations, hitCap };
+  return { turns: collectTurns(doc).length, iterations, hitCap, pagedIn };
 }
 
 /**
@@ -425,7 +454,8 @@ export async function harvestTurns(doc, opts = {}) {
     }
   };
 
-  await loadFullTranscript(doc, { ...opts, warnings, onCapture: capture });
+  const rewind = await loadFullTranscript(doc, { ...opts, warnings, onCapture: capture });
+  let pagedIn = rewind.pagedIn;
 
   const container = findScrollContainer(doc);
   if (container) {
@@ -437,10 +467,13 @@ export async function harvestTurns(doc, opts = {}) {
     let lastHeight = -1;
     let sameHeight = 0;
 
+    let barren = 0;
     for (; sweeps < sweepCap; sweeps++) {
+      const before = collected.size;
       setScrollTop(container, position);
       await sleep(waitMs);
       capture();
+      if (collected.size > before) { barren = 0; pagedIn = true; } else barren += 1;
 
       const height = Number(container.scrollHeight) || 0;
       const bottom = Math.max(0, height - view);
@@ -451,6 +484,9 @@ export async function harvestTurns(doc, opts = {}) {
         // Height can still grow as the tail re-renders; stop once it settles.
         if (sameHeight >= 2) break;
       }
+      // A static height plus several barren steps means the page is rendering a
+      // fixed slice and will not give up any more turns.
+      if (barren >= 6 && sameHeight >= 6) break;
       position = Math.min(position + step, bottom);
     }
     if (sweeps >= sweepCap) {
@@ -466,7 +502,7 @@ export async function harvestTurns(doc, opts = {}) {
     return a.order - b.order;
   });
 
-  return { entries, stats };
+  return { entries, stats, pagedIn };
 }
 
 /* ------------------------------------------------------------------ */
@@ -474,19 +510,31 @@ export async function harvestTurns(doc, opts = {}) {
 /* ------------------------------------------------------------------ */
 
 /**
- * Compare what we captured against what the turn indices imply exists.
- * A plausible-looking but truncated export is the worst outcome in this
- * category, so anything short of complete gets a shouty warning.
+ * Stable marker for "this file is not the whole conversation". The popup keys
+ * off this prefix to refuse a partial export unless the user insists, so do not
+ * reword it without telling Agent B.
+ */
+export const INCOMPLETE_PREFIX = 'INCOMPLETE EXPORT';
+
+/**
+ * Report what we could and could not recover. Deliberately reports NO total.
+ *
+ * `conversation-turn-N` is not a global message ordinal: the live 101-message
+ * conversation rendered indices 2–16. Saying "captured 7 of about 15" there
+ * would be quietly wrong by a factor of seven — precisely the failure mode this
+ * whole path exists to avoid. So we state what we have, state the gaps we can
+ * prove, and say plainly that the true length is unknown.
  *
  * @param {Array<{index:number|null}>} entries
- * @returns {{captured:number, implied:number|null, missing:number[], warnings:string[]}}
+ * @returns {{captured:number, numberedFrom:number|null, numberedTo:number|null,
+ *            missing:number[], warnings:string[]}}
  */
 export function completenessReport(entries) {
   const captured = entries.length;
   const indices = entries.map((e) => e.index).filter((i) => Number.isFinite(i));
   const warnings = [];
   if (!indices.length) {
-    return { captured, implied: null, missing: [], warnings };
+    return { captured, numberedFrom: null, numberedTo: null, missing: [], warnings };
   }
 
   const min = Math.min(...indices);
@@ -495,27 +543,29 @@ export function completenessReport(entries) {
   const missing = [];
   for (let i = min; i <= max; i++) if (!seen.has(i)) missing.push(i);
 
-  const spanned = max - min + 1;
+  const tail = 'ChatGPT does not keep a long conversation in the page, so the real length is '
+    + 'unknown and is usually far larger than these turn numbers suggest. This file is a partial '
+    + 'recovery, not a complete export — open the chat while signed in to chatgpt.com so the '
+    + 'export can use the API instead.';
+
   if (missing.length) {
     const preview = missing.slice(0, 8).join(', ');
     const more = missing.length > 8 ? `, … (+${missing.length - 8} more)` : '';
     warnings.push(
-      `INCOMPLETE EXPORT — captured ${captured} of about ${spanned} turns. `
-      + `${missing.length} turn(s) were never rendered by the page and are missing from this file `
-      + `(turn ${preview}${more}). ChatGPT only keeps part of a long conversation in the page at once; `
-      + 'open the chat while logged in so the export can use the API instead.',
+      `${INCOMPLETE_PREFIX} — only ${captured} message(s) could be recovered from the page. `
+      + `The page numbered the turns it rendered ${min}–${max}, and ${missing.length} of those are `
+      + `missing from this file (turn ${preview}${more}). ${tail}`,
     );
-  }
-  // Turn numbering starts at 1 or 2 depending on the build; a higher floor means
-  // the top of the conversation never mounted.
-  if (min > 2) {
+  } else if (min > 2) {
+    // Turn numbering starts at 1 or 2 depending on the build; a higher floor
+    // means the top of the conversation was never rendered.
     warnings.push(
-      `INCOMPLETE EXPORT — the transcript starts at turn ${min}, so roughly ${min - 1} earlier `
-      + 'message(s) are missing from this file.',
+      `${INCOMPLETE_PREFIX} — the recovered transcript starts at the page's turn ${min}, so earlier `
+      + `messages are missing from this file. ${tail}`,
     );
   }
 
-  return { captured, implied: spanned, missing, warnings };
+  return { captured, numberedFrom: min, numberedTo: max, missing, warnings };
 }
 
 /* ------------------------------------------------------------------ */
@@ -566,6 +616,7 @@ export async function scrapeConversation(opts = {}) {
 
   let entries = [];
   let stats = { unknownRoles: 0 };
+  let pagedIn = false;
 
   if (opts.scroll === false) {
     // Read-only mode (tests, share snapshots): take what is mounted right now.
@@ -579,10 +630,21 @@ export async function scrapeConversation(opts = {}) {
     const harvest = await harvestTurns(doc, { ...opts, warnings });
     entries = harvest.entries;
     stats = harvest.stats;
+    pagedIn = harvest.pagedIn;
   }
 
   const report = completenessReport(entries);
   warnings.push(...report.warnings);
+
+  // Explains *why* the export is short, and distinguishes "the page refused to
+  // load more" from "the conversation really is this length".
+  if (opts.scroll !== false && !pagedIn && report.missing.length) {
+    warnings.push(
+      'DOM fallback: scrolling the transcript did not load any further messages — the container '
+      + 'never grew — so only what the page had already rendered could be recovered. This is a '
+      + 'limitation of the ChatGPT page, not of the export.',
+    );
+  }
 
   if (stats.unknownRoles) {
     warnings.push(
@@ -601,8 +663,8 @@ export async function scrapeConversation(opts = {}) {
   const expected = Number(opts.expectedMessageCount);
   if (Number.isFinite(expected) && expected > 0 && messages.length < expected) {
     warnings.push(
-      `INCOMPLETE EXPORT — the conversation has ${expected} messages but only ${messages.length} `
-      + 'could be read from the page.',
+      `${INCOMPLETE_PREFIX} — the conversation has ${expected} messages but only ${messages.length} `
+      + 'could be read from the page. This file is a partial recovery.',
     );
   }
 

@@ -29,6 +29,7 @@ import {
   roleOf,
   turnIndex,
   turnKey,
+  INCOMPLETE_PREFIX,
 } from '../extension/src/lib/dom-scrape.js';
 import { makeDocument } from './fixtures/fake-dom.mjs';
 
@@ -847,7 +848,11 @@ test('only a fraction of a long conversation is ever mounted at once', () => {
   assert.equal(collectTurns(doc).length, mounted().length);
 });
 
-test('harvesting while scrolling captures ALL 101 turns, in order', async () => {
+// NOTE: this models a transcript that DOES page content in as you scroll — an
+// idealised list, NOT chatgpt.com. Measured live, ChatGPT never grows its
+// scrollHeight and never yields more than the ~7 turns it first rendered; see
+// "measured reality" below. This test covers the harvest ALGORITHM only.
+test('harvest algorithm: recovers every turn from a list that does page in (NOT ChatGPT)', async () => {
   const { doc } = virtualisedDoc({ total: 101 });
   const warnings = [];
   const { entries } = await harvestTurns(doc, { waitMs: 0, maxIterations: 10, warnings });
@@ -864,7 +869,8 @@ test('harvesting while scrolling captures ALL 101 turns, in order', async () => 
   assert.deepEqual(report.warnings, [], 'a complete harvest must not cry wolf');
 });
 
-test('scrapeConversation returns the whole virtualised chat with no scary warning', async () => {
+// Same caveat as above: idealised paging list, not ChatGPT.
+test('scrapeConversation returns everything when the page cooperates (idealised, NOT ChatGPT)', async () => {
   const { doc } = virtualisedDoc({ total: 101 });
   const conv = await scrapeConversation({
     document: doc,
@@ -879,17 +885,23 @@ test('scrapeConversation returns the whole virtualised chat with no scary warnin
 });
 
 test('a truncated scrape is reported LOUDLY, never returned as if complete', () => {
-  // Exactly what the coordinator measured at rest: turn-2, 4, 12, 13 and nothing else.
   const entries = [2, 4, 12, 13].map((index, order) => ({ index, order, message: { text: 'x' } }));
   const report = completenessReport(entries);
 
   assert.equal(report.captured, 4);
-  assert.equal(report.implied, 12);
+  assert.equal(report.numberedFrom, 2);
+  assert.equal(report.numberedTo, 13);
   assert.deepEqual(report.missing, [3, 5, 6, 7, 8, 9, 10, 11]);
   assert.equal(report.warnings.length, 1);
-  assert.match(report.warnings[0], /^INCOMPLETE EXPORT/);
-  assert.match(report.warnings[0], /captured 4 of about 12 turns/);
+  assert.ok(report.warnings[0].startsWith(INCOMPLETE_PREFIX));
+  assert.match(report.warnings[0], /only 4 message\(s\) could be recovered/);
+  assert.match(report.warnings[0], /numbered the turns it rendered 2–13/);
   assert.match(report.warnings[0], /turn 3, 5, 6, 7, 8, 9, 10, 11/);
+
+  // The turn index is NOT a message count: the live 101-message chat numbered its
+  // turns 2-16. Quoting a total derived from these numbers would be wrong by ~7x.
+  assert.ok(!/of about \d+ turns/.test(report.warnings[0]), 'must not quote a total it cannot know');
+  assert.match(report.warnings[0], /real length is unknown/);
 });
 
 test('a transcript that starts at a high turn index warns about the missing head', () => {
@@ -897,12 +909,13 @@ test('a transcript that starts at a high turn index warns about the missing head
   const report = completenessReport(entries);
   assert.deepEqual(report.missing, []);
   assert.equal(report.warnings.length, 1);
-  assert.match(report.warnings[0], /starts at turn 40, so roughly 39 earlier message/);
+  assert.match(report.warnings[0], /starts at the page's turn 40, so earlier\s+messages are missing/);
 });
 
 test('completenessReport stays quiet when turns carry no index at all', () => {
   const report = completenessReport([{ index: null, order: 0, message: {} }]);
-  assert.equal(report.implied, null);
+  assert.equal(report.numberedFrom, null);
+  assert.equal(report.numberedTo, null);
   assert.deepEqual(report.warnings, []);
 });
 
@@ -948,4 +961,121 @@ test('a page with nothing scrollable degrades to the scrolling element and warns
   });
   assert.equal(conv.messages.length, 2, 'still returns what is on screen');
   assert.ok(conv.warnings.some((w) => /scroll container/.test(w)), conv.warnings.join(' | '));
+});
+
+/* ------------------------------------------------------------------ */
+/* MEASURED REALITY: chatgpt.com does not page older turns in at all   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The live 101-message conversation, exactly as measured: seven turns rendered
+ * at indices 2, 4, 12, 13, 14, 15, 16 and NOTHING else, at any scroll position.
+ * scrollHeight 4037 / clientHeight 731, both constant — wheel events, PageUp and
+ * scrollTop writes all failed to grow it. The other ~94 messages were never in
+ * the page to begin with.
+ */
+function frozenTranscriptDoc() {
+  const indices = [2, 4, 12, 13, 14, 15, 16];
+  const sections = indices.map((i) => makeDocument(
+    currentTurnHtml(i, i % 2 === 0 ? 'user' : 'assistant', '<p>message at turn ' + i + '</p>'),
+  ).querySelector('section'));
+
+  let scrollWrites = 0;
+  const container = {
+    scrollHeight: 4037,
+    clientHeight: 731,
+    _top: 2400,
+    get scrollTop() { return this._top; },
+    set scrollTop(v) { scrollWrites += 1; this._top = v; }, // accepted, but nothing loads
+  };
+  const doc = {
+    title: 'Long chat',
+    scrollingElement: container,
+    defaultView: { location: { href: 'https://chatgpt.com/c/long' } },
+    querySelectorAll: (sel) => (/conversation-turn|data-turn|data-message/.test(sel)
+      ? sections.filter((el) => el.matches(sel))
+      : []),
+    querySelector(sel) { return this.querySelectorAll(sel)[0] || null; },
+  };
+  return { doc, container, writes: () => scrollWrites };
+}
+
+test('measured reality: scrolling recovers nothing extra, and we do not pretend otherwise', async () => {
+  const { doc } = frozenTranscriptDoc();
+  const warnings = [];
+  const { entries, pagedIn } = await harvestTurns(doc, { waitMs: 0, maxIterations: 10, warnings });
+
+  assert.equal(entries.length, 7, 'seven is all the page has');
+  assert.equal(pagedIn, false, 'the transcript never grew');
+  assert.deepEqual(entries.map((e) => e.index), [2, 4, 12, 13, 14, 15, 16]);
+
+  const report = completenessReport(entries);
+  assert.equal(report.captured, 7);
+  assert.deepEqual(report.missing, [3, 5, 6, 7, 8, 9, 10, 11]);
+  assert.equal(report.warnings.length, 1);
+  assert.ok(report.warnings[0].startsWith(INCOMPLETE_PREFIX));
+  assert.match(report.warnings[0], /only 7 message\(s\) could be recovered/);
+  assert.match(report.warnings[0], /numbered the turns it rendered 2–16/);
+});
+
+test('the exported file says plainly that it is a partial recovery', async () => {
+  const { doc } = frozenTranscriptDoc();
+  const conv = await scrapeConversation({
+    document: doc,
+    location: { href: 'https://chatgpt.com/c/long' },
+    waitMs: 0,
+    maxIterations: 10,
+  });
+
+  assert.equal(conv.messages.length, 7);
+  const loud = conv.warnings.filter((w) => w.startsWith(INCOMPLETE_PREFIX));
+  assert.equal(loud.length, 1, 'exactly one headline warning: ' + conv.warnings.join(' | '));
+  assert.match(loud[0], /partial recovery, not a complete export/);
+  assert.match(loud[0], /use the API instead/);
+
+  // and it explains WHY, so the user does not think the export is broken
+  assert.ok(conv.warnings.some((w) => /did not load any further messages/.test(w)),
+    conv.warnings.join(' | '));
+
+  // never a fabricated total
+  assert.ok(!conv.warnings.some((w) => /of about \d+ turns/.test(w)));
+});
+
+test('a page that will not paginate is abandoned quickly, not ground at for 8 seconds', async () => {
+  const { doc, writes } = frozenTranscriptDoc();
+  await harvestTurns(doc, { waitMs: 0, maxIterations: 80, warnings: [] });
+  // 80 rewind rounds + a 320-step sweep cap would be ~400 writes; early exit must
+  // land far below that.
+  assert.ok(writes() < 60, 'scroll writes: ' + writes());
+});
+
+test('a short chat that genuinely fits in the page is NOT marked incomplete', async () => {
+  const doc = makeDocument(CURRENT_SHAPE_HTML); // turns 2 and 3, no gaps
+  const conv = await scrapeConversation({
+    document: doc,
+    location: { href: 'https://chatgpt.com/c/short' },
+    waitMs: 0,
+    maxIterations: 2,
+  });
+  assert.equal(conv.messages.length, 2);
+  assert.ok(!conv.warnings.some((w) => w.startsWith(INCOMPLETE_PREFIX)),
+    'must not cry wolf on a complete short chat: ' + conv.warnings.join(' | '));
+});
+
+test('the API path is untouched by all of this and still returns the full branch', async () => {
+  const conv = await extractConversation({
+    fetch: fakeFetch([
+      ['/api/auth/session', () => json({ accessToken: 'tok' })],
+      ['/accounts/check/', () => json({ accounts: {} })],
+      ['/backend-api/conversation/', () => json(PAYLOAD)],
+    ]),
+    location: { origin: 'https://chatgpt.com', href: 'https://chatgpt.com/c/' + PAYLOAD.conversation_id },
+    document: frozenTranscriptDoc().doc, // a hopeless DOM, deliberately
+    waitMs: 0,
+  });
+
+  assert.equal(conv.extractedVia, 'api');
+  assert.equal(conv.messages.length, 8, 'the whole active branch, from JSON');
+  assert.ok(!conv.warnings.some((w) => w.startsWith(INCOMPLETE_PREFIX)));
+  assert.ok(!conv.warnings.some((w) => /read from the page/.test(w)), 'the DOM was never consulted');
 });
