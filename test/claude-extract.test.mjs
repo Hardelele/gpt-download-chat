@@ -1216,3 +1216,343 @@ test('a code block inside an artifact keeps its exact bytes', () => {
   assert.ok(body.includes(code.replace(/\n$/, '')), 'artifact bytes must survive unescaped');
   assert.ok(!body.includes('&lt;'), 'nothing may be HTML-escaped on the API path');
 });
+
+/* ------------------------------------------------------------------ */
+/* Real tool traffic — shapes measured on a live claude.ai account     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A `tool_use` block with the exact key set observed live. Extra keys are
+ * present on purpose: the renderer must not choke on them.
+ */
+function toolUse(name, input, extra = {}) {
+  return {
+    start_timestamp: '2026-03-01T10:00:00.000000Z',
+    stop_timestamp: '2026-03-01T10:00:02.000000Z',
+    type: 'tool_use',
+    id: `toolu_${name}`,
+    name,
+    input,
+    message: null,
+    integration_name: null,
+    integration_icon_url: null,
+    icon_name: null,
+    display_content: null,
+    tool_origin: null,
+    is_mcp_app: false,
+    ...extra,
+  };
+}
+
+/** A `tool_result` block with the exact key set observed live. */
+function toolResult(name, content, extra = {}) {
+  return {
+    start_timestamp: '2026-03-01T10:00:02.000000Z',
+    stop_timestamp: '2026-03-01T10:00:03.000000Z',
+    type: 'tool_result',
+    tool_use_id: `toolu_${name}`,
+    name,
+    content,
+    is_error: false,
+    message: null,
+    integration_name: null,
+    integration_icon_url: null,
+    icon_name: null,
+    meta: null,
+    tool_origin: null,
+    display_content: null,
+    ...extra,
+  };
+}
+
+function onlyTool(parts) {
+  const tools = parts.filter((p) => p.kind === 'tool' || p.kind === 'code');
+  assert.equal(tools.length, 1, `expected exactly one tool part, got ${parts.length}`);
+  return tools[0];
+}
+
+test('web_search renders the query and a linked source list, not fenced text', () => {
+  const part = onlyTool(renderContent([
+    toolUse('web_search', { query: 'markdown export chrome extension' }),
+    toolResult('web_search', [
+      { type: 'knowledge', title: 'First hit', url: 'https://a.example', text: 'alpha body' },
+      { type: 'knowledge', title: 'Second hit', url: 'https://b.example', text: 'beta body' },
+    ]),
+  ]));
+  assert.match(part.text, /\*\*Web search — `web_search`\*\*/);
+  assert.match(part.text, /Query: `markdown export chrome extension`/);
+  assert.match(part.text, /- \[First hit\]\(https:\/\/a\.example\)/);
+  assert.match(part.text, /- \[Second hit\]\(https:\/\/b\.example\)/);
+  assert.match(part.text, /alpha body/);
+  assert.ok(!/```/.test(part.text), 'a source list is Markdown and must not be fenced');
+  assert.equal(part.authorName, 'web_search');
+});
+
+test('web_fetch renders the URL it retrieved', () => {
+  const part = onlyTool(renderContent([
+    toolUse('web_fetch', { url: 'https://example.com/spec' }),
+    toolResult('web_fetch', [{ type: 'text', text: 'the page body' }]),
+  ]));
+  assert.match(part.text, /\*\*Web fetch — `web_fetch`\*\*/);
+  assert.match(part.text, /<https:\/\/example\.com\/spec>/);
+  assert.match(part.text, /the page body/);
+});
+
+test('bash_tool renders the command as a shell block with its output', () => {
+  const part = onlyTool(renderContent([
+    toolUse('bash_tool', { command: 'ls -la /tmp', description: 'list the temp dir' }),
+    toolResult('bash_tool', [{ type: 'text', text: 'total 0\ndrwxr-xr-x 2 root root' }]),
+  ]));
+  assert.match(part.text, /\*\*Shell — `bash_tool`\*\*/);
+  assert.match(part.text, /list the temp dir/);
+  assert.match(part.text, /```bash\nls -la \/tmp\n```/);
+  assert.match(part.text, /_Result:_/);
+  assert.match(part.text, /drwxr-xr-x/);
+});
+
+test('view renders the path and the line range', () => {
+  const part = onlyTool(renderContent([
+    toolUse('view', { path: '/repo/src/main.py', view_range: [10, 40], description: 'the handler' }),
+    toolResult('view', [{ type: 'text', text: 'def handler():\n    pass' }]),
+  ]));
+  assert.match(part.text, /\*\*Viewed file — `view`\*\*/);
+  assert.match(part.text, /Path: `\/repo\/src\/main\.py`/);
+  assert.match(part.text, /Lines 10-40/);
+  assert.match(part.text, /the handler/);
+});
+
+test('conversation_search and recent_chats render their parameters', () => {
+  const search = onlyTool(renderContent([
+    toolUse('conversation_search', { query: 'the deploy thread', max_results: 5 }),
+  ]));
+  assert.match(search.text, /Query: `the deploy thread`/);
+  assert.match(search.text, /Max results: 5/);
+
+  const recent = onlyTool(renderContent([toolUse('recent_chats', { n: 3 })]));
+  assert.match(recent.text, /\*\*Recent chats — `recent_chats`\*\*/);
+  assert.match(recent.text, /Most recent 3/);
+});
+
+test('present_files renders the paths as a list', () => {
+  const part = onlyTool(renderContent([
+    toolUse('present_files', { filepaths: ['/out/report.md', '/out/data.csv'] }),
+  ]));
+  assert.match(part.text, /- `\/out\/report\.md`/);
+  assert.match(part.text, /- `\/out\/data\.csv`/);
+});
+
+test('visualize:read_me renders its module list', () => {
+  const part = onlyTool(renderContent([
+    toolUse('visualize:read_me', { modules: ['chart', 'table'] }),
+  ]));
+  assert.match(part.text, /Modules: `chart`, `table`/);
+});
+
+test('create_file is first-class: visible code, path label, inferred language', () => {
+  const parts = renderContent([
+    toolUse('create_file', {
+      description: 'the entry point',
+      path: 'src/app/main.py',
+      file_text: 'def main():\n    print("hi")\n',
+    }),
+    toolResult('create_file', [{ type: 'text', text: 'ok' }]),
+  ]);
+  assert.deepEqual(parts.map((p) => p.kind), ['code'], 'a written file is content, not plumbing');
+  assert.equal(parts[0].authorName, null, 'content tools are not attributed to a tool author');
+  assert.match(parts[0].text, /\*\*File written — `create_file`\*\*/);
+  assert.match(parts[0].text, /the entry point/);
+  assert.match(parts[0].text, /_src\/app\/main\.py_/);
+  assert.match(parts[0].text, /```python\ndef main\(\):\n    print\("hi"\)\n```/);
+});
+
+test('create_file survives all the way to a Conversation as a visible code message', () => {
+  const convo = mapConversationPayload({
+    uuid: 'c', name: 'Wrote a file',
+    chat_messages: [{
+      uuid: 'm1', parent_message_uuid: ROOT_PARENT_UUID, sender: 'assistant',
+      created_at: '2026-03-01T10:00:00Z',
+      content: [
+        { type: 'text', text: 'Here is the script.' },
+        toolUse('create_file', { path: 'run.sh', file_text: '#!/bin/sh\necho hi\n' }),
+        toolResult('create_file', [{ type: 'text', text: 'ok' }]),
+      ],
+    }],
+  }, { sourceUrl: SOURCE_URL });
+
+  assert.deepEqual(
+    convo.messages.map((m) => [m.role, m.contentType]),
+    [['assistant', 'text'], ['assistant', 'code']],
+  );
+  // Visible by default: not gated behind includeTools, not hidden.
+  assert.equal(convo.messages[1].hidden, false);
+  assert.match(convo.messages[1].text, /```bash\n#!\/bin\/sh\necho hi\n```/);
+});
+
+test('an unknown tool degrades to a readable summary, never a raw JSON dump', () => {
+  const part = onlyTool(renderContent([
+    toolUse('message_compose_v1', {
+      recipient: 'team@example.com',
+      subject: 'Weekly update',
+      draft_id: 42,
+      send_immediately: false,
+    }),
+    toolResult('message_compose_v1', [{ type: 'text', text: 'draft saved' }]),
+  ]));
+  assert.match(part.text, /\*\*Tool — `message_compose_v1`\*\*/);
+  assert.match(part.text, /- \*\*Recipient:\*\* `team@example\.com`/);
+  assert.match(part.text, /- \*\*Subject:\*\* `Weekly update`/);
+  assert.match(part.text, /- \*\*Draft id:\*\* 42/);
+  assert.match(part.text, /draft saved/);
+  assert.ok(!/^\{/m.test(part.text), 'the input must not be dumped as raw JSON');
+});
+
+test('an unknown tool with a long string input promotes it to a fenced block', () => {
+  const body = 'x'.repeat(400);
+  const part = onlyTool(renderContent([toolUse('ask_user_input_v0', { prompt: body })]));
+  assert.match(part.text, /_Prompt:_/);
+  assert.match(part.text, /```\nx{400}\n```/);
+});
+
+test('an unknown tool with no input at all still renders a line', () => {
+  const part = onlyTool(renderContent([toolUse('mystery_tool', {})]));
+  assert.match(part.text, /\*\*Tool — `mystery_tool`\*\*/);
+});
+
+test('is_error is called out on the heading and the result', () => {
+  const part = onlyTool(renderContent([
+    toolUse('bash_tool', { command: 'exit 1' }),
+    toolResult('bash_tool', [{ type: 'text', text: 'command failed' }], { is_error: true }),
+  ]));
+  assert.match(part.text, /`bash_tool` · failed\*\*/);
+  assert.match(part.text, /_Result \(error\):_/);
+  assert.match(part.text, /command failed/);
+});
+
+test('an errored content tool still shows its result', () => {
+  const parts = renderContent([
+    toolUse('create_file', { path: 'a.txt', file_text: 'x' }),
+    toolResult('create_file', [{ type: 'text', text: 'permission denied' }], { is_error: true }),
+  ]);
+  assert.match(parts[0].text, /permission denied/);
+});
+
+test('MCP and integration tools are labelled by their integration name', () => {
+  const part = onlyTool(renderContent([
+    toolUse('search_issues', { query: 'bug' }, {
+      integration_name: 'Linear', is_mcp_app: true, tool_origin: 'mcp',
+    }),
+  ]));
+  assert.match(part.text, /`Linear · search_issues`/);
+  assert.match(part.text, /· MCP/);
+  assert.equal(part.authorName, 'Linear');
+});
+
+test('local_resource result items are rendered, not dropped', () => {
+  const part = onlyTool(renderContent([
+    toolUse('view', { path: '/a' }),
+    toolResult('view', [
+      { type: 'local_resource', name: 'notes.md', text: 'the note body' },
+    ]),
+  ]));
+  assert.match(part.text, /- \*\*notes\.md\*\*/);
+  assert.match(part.text, /the note body/);
+});
+
+test('an unrecognised tool_result content element is counted and warned about', () => {
+  const warnings = [];
+  const part = onlyTool(renderContent([
+    toolUse('web_search', { query: 'q' }),
+    toolResult('web_search', [{ type: 'brand_new_kind', text: 'still readable' }]),
+  ], { warnings }));
+  assert.match(part.text, /still readable/, 'unknown result items must not vanish');
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /tool_result\.content\[brand_new_kind\]/);
+});
+
+test('a tool_result in a LATER message still pairs with its call', () => {
+  const convo = mapConversationPayload({
+    uuid: 'c', name: 'Split tool',
+    current_leaf_message_uuid: 'm2',
+    chat_messages: [
+      {
+        uuid: 'm1', parent_message_uuid: ROOT_PARENT_UUID, sender: 'assistant',
+        created_at: '2026-03-01T10:00:00Z',
+        content: [toolUse('bash_tool', { command: 'echo hi' })],
+      },
+      {
+        uuid: 'm2', parent_message_uuid: 'm1', sender: 'assistant',
+        created_at: '2026-03-01T10:00:05Z',
+        content: [
+          toolResult('bash_tool', [{ type: 'text', text: 'hi' }]),
+          { type: 'text', text: 'Done.' },
+        ],
+      },
+    ],
+  }, { sourceUrl: SOURCE_URL });
+
+  const tools = convo.messages.filter((m) => m.role === 'tool');
+  assert.equal(tools.length, 1, 'the result must not render a second time on its own');
+  assert.match(tools[0].text, /echo hi/);
+  assert.match(tools[0].text, /_Result:_/);
+  assert.ok(convo.messages.some((m) => m.text === 'Done.'));
+});
+
+test('an orphan tool_result with no matching call still renders', () => {
+  const part = onlyTool(renderContent([
+    toolResult('web_fetch', [{ type: 'text', text: 'orphaned output' }]),
+  ]));
+  assert.match(part.text, /`web_fetch`/);
+  assert.match(part.text, /orphaned output/);
+});
+
+test('display_content is used when an unknown tool input yields nothing', () => {
+  const part = onlyTool(renderContent([
+    toolUse('opaque_tool', {}, { display_content: 'Claude’s own rendering' }),
+  ]));
+  assert.match(part.text, /Claude’s own rendering/);
+});
+
+test('tool traffic stays gated behind includeTools, not includeSystem', () => {
+  const convo = mapConversationPayload({
+    uuid: 'c', name: 'Tools',
+    chat_messages: [{
+      uuid: 'm1', parent_message_uuid: ROOT_PARENT_UUID, sender: 'assistant',
+      content: [
+        toolUse('web_search', { query: 'q' }),
+        toolResult('web_search', [{ type: 'text', text: 'r' }]),
+      ],
+    }],
+  }, { sourceUrl: SOURCE_URL });
+  const tool = convo.messages.find((m) => m.role === 'tool');
+  assert.equal(tool.hidden, false, 'hidden would require includeSystem and make includeTools inert');
+  assert.equal(tool.contentType, 'other');
+});
+
+test('the whole measured tool roster renders without throwing or dumping JSON', () => {
+  const roster = [
+    ['web_search', { query: 'q' }],
+    ['message_compose_v1', { subject: 's' }],
+    ['view', { path: '/p', view_range: [1, 2] }],
+    ['web_fetch', { url: 'https://e.example' }],
+    ['bash_tool', { command: 'ls' }],
+    ['conversation_search', { query: 'q', max_results: 3 }],
+    ['present_files', { filepaths: ['/a'] }],
+    ['ask_user_input_v0', { prompt: 'pick one' }],
+    ['recent_chats', { n: 2 }],
+    ['create_file', { path: 'a.py', file_text: 'pass' }],
+    ['visualize:read_me', { modules: ['m'] }],
+  ];
+  for (const [name, input] of roster) {
+    const parts = renderContent([toolUse(name, input)]);
+    assert.equal(parts.length, 1, `${name} produced ${parts.length} parts`);
+    assert.ok(parts[0].text.includes(name) || parts[0].text.includes('File written'),
+      `${name} is not identifiable in its output`);
+    assert.ok(!/^\s*\{\s*$/m.test(parts[0].text), `${name} fell through to a raw JSON dump`);
+  }
+});
+
+test('artifact folding still works for older conversations', () => {
+  // Regression guard: the legacy path must survive the tool-renderer rewrite.
+  const map = collectArtifacts(artifactBranch());
+  assert.equal(map.get('demo').content, 'x = 3\ny = 2\n');
+});
