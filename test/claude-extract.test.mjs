@@ -320,12 +320,16 @@ test('renderContent keeps an unknown block type rather than dropping it', () => 
 test('renderContent drops the artifact tool_result echo but keeps other tool results', () => {
   const parts = renderContent(fixture().chat_messages.find((m) => m.uuid === M6).content);
   const kinds = parts.map((p) => p.kind);
-  assert.deepEqual(kinds, ['text', 'code', 'tool', 'tool', 'text']);
+  // The repl call and its result are now ONE paired part, not two.
+  assert.deepEqual(kinds, ['text', 'code', 'tool', 'text']);
   assert.ok(!parts.some((p) => p.kind === 'tool' && /artifacts/.test(p.text)));
   assert.deepEqual(
     parts.filter((p) => p.kind === 'tool').map((p) => p.authorName),
-    ['repl', 'repl'],
+    ['repl'],
   );
+  const repl = parts.find((p) => p.kind === 'tool');
+  assert.match(repl.text, /console\.log\(1\)/, 'the call must be rendered');
+  assert.match(repl.text, /_Result:_/, 'the result must render with its call');
 });
 
 test('renderContent marks an errored tool result', () => {
@@ -470,7 +474,6 @@ test('nodeToMessages emits assistant/code for an artifact and tool for real tool
       ['assistant', 'text'],
       ['assistant', 'code'],
       ['tool', 'other'],
-      ['tool', 'other'],
       ['assistant', 'text'],
     ],
   );
@@ -559,8 +562,7 @@ test('mapConversationPayload exports the active branch in chronological order', 
     'user:text',           // M5
     'assistant:text',      // M6 prose
     'assistant:code',      // M6 artifact
-    'tool:other',          // M6 repl call
-    'tool:other',          // M6 repl result
+    'tool:other',          // M6 repl call paired with its result
     'assistant:text',      // M6 closing prose
   ]);
   const joined = convo.messages.map((m) => m.text).join('\n');
@@ -729,7 +731,7 @@ test('extractConversation returns the API result when the API works', async () =
   });
   assert.equal(convo.extractedVia, 'api');
   assert.equal(convo.title, 'Sorting a CSV in Python');
-  assert.equal(convo.messages.length, 9);
+  assert.equal(convo.messages.length, 8);
 });
 
 test('extractConversation degrades to the page and warns when the API 403s', async () => {
@@ -914,8 +916,10 @@ test('renderContent renders create_file as code and infers the language from the
     { type: 'tool_result', tool_use_id: 'c1', name: 'create_file', content: [{ type: 'text', text: 'ok' }] },
   ]);
   assert.deepEqual(parts.map((p) => p.kind), ['code'], 'the "ok" result must be suppressed');
-  assert.match(parts[0].text, /\*\*File: app\/main\.py\*\*/);
+  assert.match(parts[0].text, /\*\*File written — `create_file`\*\*/);
+  assert.match(parts[0].text, /_app\/main\.py_/);
   assert.match(parts[0].text, /```python\nprint\(1\)\n```/);
+  assert.ok(!/_Result:_/.test(parts[0].text), 'the bare "ok" echo must not be shown');
 });
 
 test('renderContent keeps knowledge items in a tool_result instead of dropping them', () => {
@@ -925,8 +929,9 @@ test('renderContent keeps knowledge items in a tool_result instead of dropping t
       content: [{ type: 'knowledge', title: 'A page', url: 'https://example.com', text: 'body text' }],
     },
   ]);
-  assert.match(parts[0].text, /A page — https:\/\/example\.com/);
+  assert.match(parts[0].text, /\[A page\]\(https:\/\/example\.com\)/);
   assert.match(parts[0].text, /body text/);
+  assert.ok(!/```/.test(parts[0].text), 'a knowledge list is Markdown and must not be fenced');
 });
 
 /* ------------------------------------------------------------------ */

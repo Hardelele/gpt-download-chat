@@ -251,48 +251,319 @@ export function fence(body, language) {
  * @property {boolean} hidden
  */
 
-function toolResultText(block) {
-  const content = block && block.content;
-  if (typeof content === 'string') return content;
-  const chunks = [];
-  for (const item of asArray(content)) {
-    if (typeof item === 'string') {
-      chunks.push(item);
-    } else if (item && item.type === 'knowledge') {
-      // Share-snapshot payloads return search results as `knowledge` items.
-      // Matching only `type === 'text'` here throws most of the payload away.
-      const head = [item.title, item.url].filter(Boolean).join(' — ');
-      chunks.push([head, item.text].filter(Boolean).join('\n'));
-    } else if (item && typeof item.text === 'string') {
-      chunks.push(item.text);
-    } else if (item && item.type === 'image') {
-      chunks.push('_(image result)_');
-    } else if (item) {
-      chunks.push(safeJson(item));
-    }
-  }
-  return chunks.filter((c) => c && c.trim()).join('\n\n');
+/* ------------------------------------------------------------------ */
+/* Tool rendering                                                      */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Measured against 15 live conversations (8 of them tool-using, 46 `tool_use`
+ * and 45 `tool_result` blocks). Tool traffic is the COMMON case, not an edge
+ * case, and `artifacts` did not appear once — `create_file` is what writing a
+ * file looks like today. Rendering any of this as a JSON dump would be a
+ * failure, so the table below maps a tool name to how it should read, and
+ * anything unknown degrades to a readable key/value summary rather than
+ * vanishing.
+ *
+ * Observed `tool_use` keys:    start_timestamp stop_timestamp type id name
+ *   input message integration_name integration_icon_url icon_name
+ *   display_content tool_origin is_mcp_app
+ * Observed `tool_result` keys: start_timestamp stop_timestamp type tool_use_id
+ *   name content is_error message integration_name integration_icon_url
+ *   icon_name meta tool_origin display_content
+ */
+
+function inlineCode(v) {
+  const s = String(v);
+  return s.includes('`') ? `\`\` ${s} \`\`` : `\`${s}\``;
+}
+
+function bulletList(items) {
+  return items.filter((x) => x != null && String(x).trim()).map((x) => `- ${x}`).join('\n');
 }
 
 /**
- * Tools other than `artifacts` whose input carries real content the reader
- * wants, rather than plumbing worth dumping as JSON.
- * name -> [content field, language field or literal, title field]
+ * Tool name -> renderer.
+ *  `label`   human name for the heading.
+ *  `summary` (input) => string | string[] | null   Markdown, shown above the result.
+ *  `body`    (input) => {code, lang} | null        a fenced block of real content.
+ *  `content` true when this tool WRITES something the reader wants inline; such
+ *            tools render as `contentType:'code'` and stay visible by default.
  */
-const CONTENT_TOOLS = {
-  create_file: { body: 'file_text', title: 'path' },
-  'visualize:show_widget': { body: 'widget_code', title: 'title', language: 'jsx' },
+export const TOOL_SPECS = {
+  create_file: {
+    label: 'File written',
+    content: true,
+    summary: (i) => firstString(i.description),
+    body: (i) => (typeof i.file_text === 'string' && i.file_text.trim()
+      ? { code: i.file_text, lang: languageFromPath(firstString(i.path)) || '', title: firstString(i.path) }
+      : null),
+  },
+  'visualize:show_widget': {
+    label: 'Widget',
+    content: true,
+    body: (i) => (typeof i.widget_code === 'string' && i.widget_code.trim()
+      ? { code: i.widget_code, lang: 'jsx', title: firstString(i.title) }
+      : null),
+  },
+  bash_tool: {
+    label: 'Shell',
+    summary: (i) => firstString(i.description),
+    body: (i) => (typeof i.command === 'string' && i.command.trim()
+      ? { code: i.command, lang: 'bash' }
+      : null),
+  },
+  web_search: {
+    label: 'Web search',
+    summary: (i) => (firstString(i.query) ? `Query: ${inlineCode(i.query)}` : null),
+  },
+  web_fetch: {
+    label: 'Web fetch',
+    summary: (i) => (firstString(i.url) ? `Fetched: <${i.url}>` : null),
+  },
+  conversation_search: {
+    label: 'Searched past chats',
+    summary: (i) => [
+      firstString(i.query) ? `Query: ${inlineCode(i.query)}` : null,
+      i.max_results != null ? `Max results: ${i.max_results}` : null,
+    ],
+  },
+  recent_chats: {
+    label: 'Recent chats',
+    summary: (i) => (i.n != null ? `Most recent ${i.n}` : null),
+  },
+  view: {
+    label: 'Viewed file',
+    summary: (i) => [
+      firstString(i.path) ? `Path: ${inlineCode(i.path)}` : null,
+      Array.isArray(i.view_range) ? `Lines ${i.view_range.join('-')}` : null,
+      firstString(i.description),
+    ],
+  },
+  present_files: {
+    label: 'Files presented',
+    summary: (i) => (asArray(i.filepaths).length
+      ? bulletList(asArray(i.filepaths).map(inlineCode))
+      : null),
+  },
+  'visualize:read_me': {
+    label: 'Visualize',
+    summary: (i) => (asArray(i.modules).length
+      ? `Modules: ${asArray(i.modules).map(inlineCode).join(', ')}`
+      : null),
+  },
 };
 
-function renderContentTool(block) {
-  const spec = CONTENT_TOOLS[block && block.name];
-  if (!spec) return null;
-  const input = (block.input && typeof block.input === 'object') ? block.input : {};
-  const body = input[spec.body];
-  if (typeof body !== 'string' || !body.trim()) return null;
-  const title = firstString(input[spec.title]);
-  const language = spec.language || languageFromPath(title) || '';
-  return `**${block.name === 'create_file' ? 'File' : 'Widget'}${title ? `: ${title}` : ''}**\n\n${fence(body, language)}`;
+/** True when a tool writes content the reader wants inline and visible. */
+export function isContentTool(name) {
+  const spec = TOOL_SPECS[name];
+  return Boolean(spec && spec.content);
+}
+
+/**
+ * Readable key/value summary of an arbitrary tool input — the fallback for a
+ * tool with no entry in TOOL_SPECS. Never a raw JSON dump when it can be
+ * helped: short scalars go inline, long strings get their own fenced block.
+ * @param {object} input
+ * @returns {string|null}
+ */
+export function genericInputSummary(input) {
+  if (!input || typeof input !== 'object') return null;
+  if (Array.isArray(input)) return bulletList(input.map((v) => inlineCode(safeInline(v)))) || null;
+
+  const lines = [];
+  const blocks = [];
+  for (const [key, value] of Object.entries(input)) {
+    if (value == null || value === '') continue;
+    const nice = key.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+    if (typeof value === 'string') {
+      if (value.includes('\n') || value.length > 200) blocks.push(`_${nice}:_\n\n${fence(value, '')}`);
+      else lines.push(`- **${nice}:** ${inlineCode(value)}`);
+    } else if (typeof value === 'number' || typeof value === 'boolean') {
+      lines.push(`- **${nice}:** ${value}`);
+    } else if (Array.isArray(value)) {
+      const flat = value.every((v) => typeof v !== 'object' || v === null);
+      if (flat) lines.push(`- **${nice}:** ${value.map((v) => inlineCode(safeInline(v))).join(', ')}`);
+      else blocks.push(`_${nice}:_\n\n${fence(safeJson(value), 'json')}`);
+    } else {
+      blocks.push(`_${nice}:_\n\n${fence(safeJson(value), 'json')}`);
+    }
+  }
+  const out = [lines.join('\n'), ...blocks].filter((s) => s && s.trim()).join('\n\n');
+  return out || null;
+}
+
+function safeInline(v) {
+  if (v == null) return '';
+  return typeof v === 'object' ? safeJson(v) : String(v);
+}
+
+/**
+ * `display_content` is present on both tool block kinds and is Claude's own
+ * user-visible rendering. Shape is not fully documented, so probe defensively.
+ * @param {object} block
+ * @returns {string|null}
+ */
+export function displayContentText(block) {
+  const dc = block && block.display_content;
+  if (!dc) return null;
+  if (typeof dc === 'string') return dc.trim() ? dc : null;
+  if (Array.isArray(dc)) {
+    const joined = dc.map((d) => (typeof d === 'string' ? d : firstString(d && d.text, d && d.content)))
+      .filter(Boolean).join('\n\n');
+    return joined.trim() ? joined : null;
+  }
+  if (typeof dc === 'object') {
+    const v = firstString(dc.text, dc.content, dc.markdown, dc.title);
+    return v && v.trim() ? v : null;
+  }
+  return null;
+}
+
+/**
+ * Render a `tool_result`'s content array.
+ *
+ * `content` is an ARRAY, never a string, and its element types were measured as
+ * `text`, `knowledge` and `local_resource`. Matching only `text` throws most of
+ * a web-search result away, so all three are handled and anything else is
+ * counted so it can be warned about rather than silently dropped.
+ *
+ * @param {object} block
+ * @param {{unknown?:string[]}} [ctx]
+ * @returns {{text:string, fenced:boolean}}
+ */
+export function toolResultText(block, ctx = {}) {
+  const content = block && block.content;
+  if (typeof content === 'string') return { text: content, fenced: true };
+
+  const chunks = [];
+  let markdown = false;
+
+  for (const item of asArray(content)) {
+    if (typeof item === 'string') {
+      chunks.push(item);
+      continue;
+    }
+    if (!item || typeof item !== 'object') continue;
+    const type = typeof item.type === 'string' ? item.type : '';
+
+    if (type === 'text') {
+      if (typeof item.text === 'string' && item.text.trim()) chunks.push(item.text);
+    } else if (type === 'knowledge') {
+      // A search hit: title, url, and the extracted body.
+      markdown = true;
+      const title = firstString(item.title) || firstString(item.url) || 'source';
+      const url = firstString(item.url);
+      const head = url ? `- [${title}](${url})` : `- ${title}`;
+      const body = firstString(item.text, item.content);
+      chunks.push(body ? `${head}\n\n${indent(body.trim(), '  ')}` : head);
+    } else if (type === 'local_resource') {
+      markdown = true;
+      const name = firstString(item.name, item.title, item.path, item.uri, item.file_name) || 'resource';
+      const body = firstString(item.text, item.content, item.description);
+      chunks.push(body ? `- **${name}**\n\n${indent(body.trim(), '  ')}` : `- **${name}**`);
+    } else if (type === 'image') {
+      markdown = true;
+      chunks.push('_(image result)_');
+    } else {
+      if (Array.isArray(ctx.unknown)) ctx.unknown.push(`tool_result.content[${type || 'untyped'}]`);
+      const fallback = firstString(item.text, item.content) || safeJson(item);
+      chunks.push(fallback);
+    }
+  }
+
+  const text = chunks.filter((c) => c && c.trim()).join('\n\n');
+  return { text, fenced: !markdown };
+}
+
+function indent(text, pad) {
+  return String(text).split('\n').map((l) => (l.trim() ? pad + l : l)).join('\n');
+}
+
+/** Heading label for a tool, preferring an integration/MCP name when present. */
+export function toolLabel(block) {
+  const name = firstString(block && block.name) || 'tool';
+  const integration = firstString(block && block.integration_name);
+  if (integration && integration.toLowerCase() !== name.toLowerCase()) {
+    return `${integration} · ${name}`;
+  }
+  return name;
+}
+
+/**
+ * Render one tool call together with its result.
+ *
+ * @param {object|null} use     the `tool_use` block
+ * @param {object|null} result  the matching `tool_result`, if any
+ * @param {{unknown?:string[]}} [ctx]
+ * @returns {{text:string, authorName:string, content:boolean}|null}
+ */
+export function renderTool(use, result, ctx = {}) {
+  const source = use || result;
+  if (!source) return null;
+  const name = firstString(use && use.name, result && result.name) || 'tool';
+  const spec = TOOL_SPECS[name] || null;
+  const input = (use && use.input && typeof use.input === 'object') ? use.input : {};
+  const failed = Boolean(result && result.is_error === true);
+  const mcp = (use && use.is_mcp_app === true) || (result && result.is_mcp_app === true);
+
+  const heading = `**${spec ? spec.label : 'Tool'} — \`${toolLabel(source)}\`${mcp ? ' · MCP' : ''}${failed ? ' · failed' : ''}**`;
+  const sections = [heading];
+
+  const summary = spec && spec.summary ? spec.summary(input) : null;
+  const summaryText = Array.isArray(summary)
+    ? summary.filter(Boolean).join('\n')
+    : (summary || null);
+  if (summaryText && summaryText.trim()) {
+    sections.push(summaryText);
+  } else if (!spec) {
+    const generic = genericInputSummary(input) || displayContentText(use);
+    if (generic) sections.push(generic);
+  }
+
+  const body = spec && spec.body ? spec.body(input) : null;
+  if (body && typeof body.code === 'string' && body.code.trim()) {
+    if (body.title) sections.push(`_${body.title}_`);
+    sections.push(fence(body.code, body.lang || ''));
+  }
+
+  // A content tool's result is a bare "ok" acknowledging the write — the file
+  // itself is already above it. Keep it only when it reports a failure.
+  const skipResult = Boolean(spec && spec.content) && !failed;
+
+  if (result && !skipResult) {
+    const { text, fenced } = toolResultText(result, ctx);
+    const shown = text.trim() ? text : displayContentText(result);
+    if (shown && shown.trim()) {
+      sections.push(failed ? '_Result (error):_' : '_Result:_');
+      sections.push(fenced ? fence(shown, '') : shown);
+    }
+  }
+
+  // A tool we know nothing about, with nothing to show, is still worth a line —
+  // silence would misrepresent the conversation.
+  return {
+    text: sections.join('\n\n'),
+    authorName: firstString(source.integration_name, name) || 'tool',
+    content: Boolean(spec && spec.content),
+  };
+}
+
+/**
+ * Index every `tool_result` in a branch by `tool_use_id`, so a call and its
+ * output render together even when the result lands in a later message.
+ * @param {object[]} nodes
+ * @returns {Map<string, object>}
+ */
+export function collectToolResults(nodes) {
+  const map = new Map();
+  for (const node of asArray(nodes)) {
+    for (const block of asArray(node && node.content)) {
+      if (!block || block.type !== 'tool_result') continue;
+      const id = firstString(block.tool_use_id);
+      if (id && !map.has(id)) map.set(id, block);
+    }
+  }
+  return map;
 }
 
 const EXT_LANGUAGE = {
@@ -333,6 +604,13 @@ export function renderContent(blocks, ctx = {}) {
   const artifactToolUseIds = new Set();
   const unknown = [];
   const list = asArray(blocks);
+
+  // Results are usually in the same message as their call, but not always, so
+  // the conversation-wide index wins when one is supplied. `consumed` is shared
+  // across messages so a result rendered beside its call is not repeated when
+  // its own message is reached.
+  const results = ctx.toolResults || collectToolResults([{ content: list }]);
+  const consumed = ctx.consumedResults || new Set();
 
   for (let i = 0; i < list.length; i++) {
     const block = list[i];
@@ -394,22 +672,22 @@ export function renderContent(blocks, ctx = {}) {
         continue;
       }
 
-      const contentTool = renderContentTool(block);
-      if (contentTool) {
-        // The matching result is a bare "ok" — the content is already rendered.
-        artifactToolUseIds.add(block.id);
-        parts.push({ kind: 'code', text: contentTool, authorName: null, hidden: false });
-        continue;
+      // A real tool call. Pair it with its result so the call and its output
+      // read as one unit, then render it through the TOOL_SPECS table.
+      const result = results.get(firstString(block.id)) || null;
+      if (result) consumed.add(result);
+      const rendered = renderTool(block, result, { unknown });
+      if (rendered) {
+        parts.push({
+          // Tools that WRITE something (create_file today, artifacts
+          // historically) are the reason people export the chat — they render
+          // as visible content, not as gated tool plumbing.
+          kind: rendered.content ? 'code' : 'tool',
+          text: rendered.text,
+          authorName: rendered.content ? null : rendered.authorName,
+          hidden: false,
+        });
       }
-
-      const name = firstString(block.name) || 'tool';
-      const input = block.input === undefined ? '' : safeJson(block.input);
-      parts.push({
-        kind: 'tool',
-        text: input ? `**Tool call — \`${name}\`**\n\n${fence(input, 'json')}` : `**Tool call — \`${name}\`**`,
-        authorName: name,
-        hidden: false,
-      });
       continue;
     }
 
@@ -417,16 +695,15 @@ export function renderContent(blocks, ctx = {}) {
       // The echo Claude sends back after writing an artifact carries no
       // information the reader wants; the artifact itself is already rendered.
       if (artifactToolUseIds.has(block.tool_use_id)) continue;
-      const name = firstString(block.name) || 'tool';
-      const text = toolResultText(block);
-      if (!text.trim()) continue;
-      const isError = block.is_error === true;
-      parts.push({
-        kind: 'tool',
-        text: `**Tool result — \`${name}\`${isError ? ' (error)' : ''}**\n\n${fence(text, '')}`,
-        authorName: name,
-        hidden: false,
-      });
+      // Already rendered next to its own call.
+      if (consumed.has(block)) continue;
+      // An orphan result: its `tool_use` is on another branch or was elided.
+      const rendered = renderTool(null, block, { unknown });
+      if (rendered && rendered.text.trim()) {
+        parts.push({
+          kind: 'tool', text: rendered.text, authorName: rendered.authorName, hidden: false,
+        });
+      }
       continue;
     }
 
@@ -698,6 +975,8 @@ export function nodeToMessages(node, opts = {}) {
   const warnings = Array.isArray(opts.warnings) ? opts.warnings : null;
   const parts = renderContent(node.content, {
     artifacts: opts.artifacts,
+    toolResults: opts.toolResults,
+    consumedResults: opts.consumedResults,
     messageKey: baseId || `#${opts.index == null ? 0 : opts.index}`,
     warnings,
   });
@@ -817,9 +1096,13 @@ export function mapConversationPayload(payload, opts = {}) {
     );
   }
 
-  // Artifacts are authored across many blocks and many turns; fold them first
-  // so only the finished version of each is rendered.
+  // Legacy artifacts (not present in current claude.ai data, but kept for older
+  // conversations) are authored across many blocks and turns; fold them first.
   const artifacts = collectArtifacts(branch);
+  // Tool results are indexed branch-wide so a call renders with its output even
+  // when the result lands in a later message.
+  const toolResults = collectToolResults(branch);
+  const consumedResults = new Set();
 
   // No pagination has been observed on this endpoint, but an array whose length
   // is exactly a round number is the shape a silent limit would take.
@@ -834,7 +1117,9 @@ export function mapConversationPayload(payload, opts = {}) {
   const messages = [];
   branch.forEach((node, index) => {
     try {
-      messages.push(...nodeToMessages(node, { origin: opts.origin, artifacts, index, warnings }));
+      messages.push(...nodeToMessages(node, {
+        origin: opts.origin, artifacts, toolResults, consumedResults, index, warnings,
+      }));
     } catch (err) {
       warnings.push(`Skipped one message that could not be read (${err && err.message ? err.message : err}).`);
     }
