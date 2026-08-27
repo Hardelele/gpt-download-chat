@@ -5,6 +5,9 @@ import {
   toMarkdown,
   DEFAULT_OPTIONS,
   EXPORTER_VERSION,
+  convertMathDelimiters,
+  incompleteWarning,
+  INCOMPLETE_PREFIX,
 } from '../shared/lib/markdown.js';
 import { buildFilename, slugify } from '../shared/lib/filename.js';
 
@@ -68,6 +71,7 @@ test('DEFAULT_OPTIONS matches the contract', () => {
     headingStyle: 'h2',
     userLabel: 'You',
     assistantLabel: 'ChatGPT',
+    mathDelimiters: 'dollar',
   });
 });
 
@@ -590,4 +594,224 @@ test('includeTools / includeThoughts override the hidden flag (real ChatGPT shap
   assert.equal(sys.includes('TOOL TEXT'), false);
 
   assert.match(toMarkdown(c, { now: NOW }), /^messages: 0$/m);
+});
+
+/* ------------------------------------------------------------------ *
+ * LaTeX delimiter normalisation
+ * ------------------------------------------------------------------ */
+
+test('mathDelimiters defaults to dollar', () => {
+  assert.equal(DEFAULT_OPTIONS.mathDelimiters, 'dollar');
+});
+
+test('inline \\( x \\) becomes $x$', () => {
+  assert.equal(
+    convertMathDelimiters('The value \\( x^2 + 1 \\) is positive.'),
+    'The value $x^2 + 1$ is positive.',
+  );
+});
+
+test('display \\[ x \\] becomes $$x$$', () => {
+  assert.equal(
+    convertMathDelimiters('Therefore:\n\n\\[ E = mc^2 \\]\n\ndone'),
+    'Therefore:\n\n$$E = mc^2$$\n\ndone',
+  );
+});
+
+test('multi-line display math keeps its line structure', () => {
+  const input = '\\[\n  a = b \\\\\n  c = d\n\\]';
+  assert.equal(convertMathDelimiters(input), '$$\n  a = b \\\\\n  c = d\n$$');
+});
+
+test('math inside a fenced code block is untouched', () => {
+  const input = '```bash\nif \\( true \\); then echo hi; fi\n```';
+  assert.equal(convertMathDelimiters(input), input);
+});
+
+test('math inside an inline code span is untouched', () => {
+  const input = 'Write `\\( x \\)` for inline math.';
+  assert.equal(convertMathDelimiters(input), input);
+  // double-backtick spans too
+  const input2 = 'Write ``a \\( b \\) c`` verbatim.';
+  assert.equal(convertMathDelimiters(input2), input2);
+});
+
+test('unbalanced delimiters are left alone', () => {
+  assert.equal(convertMathDelimiters('An open \\( with no closer.'),
+    'An open \\( with no closer.');
+  assert.equal(convertMathDelimiters('A stray \\] closer.'), 'A stray \\] closer.');
+});
+
+test('an escaped backslash before a paren is not a delimiter', () => {
+  const input = 'A literal \\\\( paren \\\\) here.';
+  assert.equal(convertMathDelimiters(input), input);
+});
+
+test('an odd backslash run keeps the escaped backslash and converts the delimiter', () => {
+  // `\\\(` = escaped backslash, then a real opening delimiter
+  assert.equal(convertMathDelimiters('x \\\\\\( y \\\\\\) z'), 'x \\\\$y \\\\$ z');
+});
+
+test('a span crossing a blank line is prose, not math', () => {
+  const input = 'text \\( one\n\ntwo \\) more';
+  assert.equal(convertMathDelimiters(input), input);
+});
+
+test('a span already containing $ is refused', () => {
+  const input = 'price \\( \\$5 \\) done';
+  assert.equal(convertMathDelimiters(input), input);
+});
+
+test('an empty span is refused', () => {
+  assert.equal(convertMathDelimiters('nothing \\(  \\) here'), 'nothing \\(  \\) here');
+});
+
+test('several spans on one line all convert', () => {
+  assert.equal(convertMathDelimiters('\\(a\\) and \\(b\\) and \\(c\\)'), '$a$ and $b$ and $c$');
+});
+
+test('a mixed document converts prose math and preserves every code form', () => {
+  const input = [
+    'Given \\( a > 0 \\):',
+    '',
+    '\\[',
+    '  f(x) = a x^2',
+    '\\]',
+    '',
+    '```py',
+    'x = "\\\\(nope\\\\)"',
+    'y = "\\( also nope \\)"',
+    '```',
+    '',
+    'and `\\( inline nope \\)` and finally \\( b \\).',
+  ].join('\n');
+  const out = convertMathDelimiters(input);
+  assert.equal(out.includes('Given $a > 0$:'), true);
+  assert.equal(out.includes('$$\n  f(x) = a x^2\n$$'), true);
+  assert.equal(out.includes('y = "\\( also nope \\)"'), true, 'fenced math must survive');
+  assert.equal(out.includes('`\\( inline nope \\)`'), true, 'inline-code math must survive');
+  assert.equal(out.includes('finally $b$.'), true);
+});
+
+test('braces and backslashes inside math survive the conversion', () => {
+  assert.equal(convertMathDelimiters('set \\( \\{x : x > 0\\} \\) ok'), 'set $\\{x : x > 0\\}$ ok');
+});
+
+test('text with no delimiters is returned identically', () => {
+  const input = 'plain (parens) and [brackets] and a \\ backslash';
+  assert.equal(convertMathDelimiters(input), input);
+});
+
+test('mathDelimiters: preserve round-trips the body byte-for-byte', () => {
+  const text = 'Inline \\( x \\) and display \\[ y \\] stay put.';
+  const out = toMarkdown(conv({ messages: [msg({ role: 'assistant', text })] }), {
+    now: NOW,
+    frontmatter: false,
+    mathDelimiters: 'preserve',
+  });
+  assert.equal(out.includes(text), true);
+  assert.equal(out.includes('$'), false);
+});
+
+test('mathDelimiters flows through toMarkdown by default', () => {
+  const out = toMarkdown(
+    conv({ messages: [msg({ role: 'assistant', text: 'so \\( e^{i\\pi} = -1 \\) holds' })] }),
+    { now: NOW, frontmatter: false },
+  );
+  assert.equal(out.includes('so $e^{i\\pi} = -1$ holds'), true);
+});
+
+test('an invalid mathDelimiters value falls back to dollar', () => {
+  const out = toMarkdown(conv({ messages: [msg({ text: '\\( x \\)' })] }), {
+    now: NOW,
+    frontmatter: false,
+    mathDelimiters: 'nonsense',
+  });
+  assert.equal(out.includes('$x$'), true);
+});
+
+/* ------------------------------------------------------------------ *
+ * partial-export refusal
+ * ------------------------------------------------------------------ */
+
+const PARTIAL_WARNING =
+  `${INCOMPLETE_PREFIX} — only 7 message(s) could be recovered from the page. `
+  + 'Sign in and reopen the chat for a complete export.';
+
+test('INCOMPLETE_PREFIX matches the extractor that produces it', async () => {
+  // Drift guard: the popup refuses a partial download on this exact string.
+  const { INCOMPLETE_PREFIX: fromExtractor } = await import(
+    '../extension/src/lib/dom-scrape.js'
+  );
+  assert.equal(INCOMPLETE_PREFIX, fromExtractor);
+});
+
+test('incompleteWarning finds the headline warning, or returns empty', () => {
+  assert.equal(incompleteWarning({ warnings: [PARTIAL_WARNING] }), PARTIAL_WARNING);
+  assert.equal(incompleteWarning({ warnings: ['DOM fallback: something else'] }), '');
+  assert.equal(incompleteWarning({ warnings: [] }), '');
+  assert.equal(incompleteWarning({}), '');
+  assert.equal(incompleteWarning(null), '');
+  assert.equal(incompleteWarning({ warnings: [null, 42] }), '');
+});
+
+test('a partial export is announced at the top of the file', () => {
+  const out = toMarkdown(
+    conv({ messages: [msg()], warnings: [PARTIAL_WARNING] }),
+    { now: NOW },
+  );
+  const title = out.indexOf('# Some chat title');
+  const callout = out.indexOf('> [!WARNING]');
+  const firstTurn = out.indexOf('## You');
+  assert.ok(callout > title && callout < firstTurn, 'callout sits between title and first turn');
+  assert.match(out, /^> \*\*Incomplete export\.\*\* only 7 message\(s\)/m);
+  // the machine-readable sentinel is not shown to the reader in the callout
+  assert.equal(out.slice(callout, firstTurn).includes(INCOMPLETE_PREFIX), false);
+});
+
+test('a partial export sets incomplete: true in the frontmatter', () => {
+  const partial = toMarkdown(conv({ messages: [msg()], warnings: [PARTIAL_WARNING] }), { now: NOW });
+  assert.match(partial, /^incomplete: true$/m);
+
+  const complete = toMarkdown(conv({ messages: [msg()] }), { now: NOW });
+  assert.doesNotMatch(complete, /^incomplete:/m);
+});
+
+test('incomplete warnings sort to the front of the export notes', () => {
+  const out = toMarkdown(
+    conv({ messages: [msg()], warnings: ['A minor note', PARTIAL_WARNING] }),
+    { now: NOW },
+  );
+  const notes = out.slice(out.indexOf('> **Export notes**'));
+  assert.ok(notes.indexOf(INCOMPLETE_PREFIX) < notes.indexOf('A minor note'));
+});
+
+test('a complete export gets no callout and no incomplete key', () => {
+  const out = toMarkdown(conv({ messages: [msg()], warnings: ['just a note'] }), { now: NOW });
+  assert.equal(out.includes('> [!WARNING]'), false);
+  assert.equal(out.includes('Incomplete export'), false);
+});
+
+test('buildFilename marks a partial export on disk', () => {
+  assert.equal(
+    buildFilename(conv({ title: 'Some chat title', warnings: [PARTIAL_WARNING] })),
+    '2026-03-26-some-chat-title-partial.md',
+  );
+  assert.equal(
+    buildFilename(conv({ title: 'Some chat title', warnings: [] })),
+    '2026-03-26-some-chat-title.md',
+  );
+});
+
+test('the partial marker survives a title that hits the length cap', () => {
+  const title = Array.from({ length: 40 }, (_, i) => `word${i}`).join(' ');
+  const out = buildFilename({
+    title,
+    id: 'unknown',
+    createTime: null,
+    updateTime: null,
+    warnings: [PARTIAL_WARNING],
+  });
+  assert.equal(out.endsWith('-partial.md'), true);
+  assert.doesNotMatch(out, /[\\/:*?"<>|]/);
 });

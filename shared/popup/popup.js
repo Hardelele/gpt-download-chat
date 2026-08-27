@@ -16,7 +16,12 @@
  *      Copy     -> rendered here, straight to the clipboard
  */
 
-import { toMarkdown, DEFAULT_OPTIONS } from '../lib/markdown.js';
+import {
+  toMarkdown,
+  DEFAULT_OPTIONS,
+  incompleteWarning,
+  INCOMPLETE_PREFIX,
+} from '../lib/markdown.js';
 import { buildFilename } from '../lib/filename.js';
 import { PLATFORM, CONVERSATION_URL } from '../platform.js';
 
@@ -25,12 +30,21 @@ const STORAGE_KEY = 'renderOptions';
 
 const OPTION_IDS = [
   'frontmatter',
+  'mathDelimiters',
   'timestamps',
   'includeThoughts',
   'includeTools',
   'includeSystem',
   'headingStyle',
 ];
+
+/**
+ * Options whose value is one of two strings but which read better as a single
+ * checkbox: `[checked, unchecked]`.
+ */
+const CHECKBOX_ENUMS = {
+  mathDelimiters: ['dollar', 'preserve'],
+};
 
 const el = (id) => document.getElementById(id);
 const panes = {
@@ -56,6 +70,7 @@ async function init() {
 
   el('retry').addEventListener('click', () => { void start(); });
   el('download').addEventListener('click', () => { void onDownload(); });
+  el('download-anyway').addEventListener('click', () => { void onDownload('download-anyway'); });
   el('copy').addEventListener('click', () => { void onCopy(); });
 
   await start();
@@ -169,8 +184,24 @@ function renderReady(c) {
   el('chat-title').textContent = c.title || PLATFORM.fallbackTitle;
   el('chat-meta').textContent = metaLine(c);
 
-  const warnings = Array.isArray(c.warnings) ? c.warnings.filter(Boolean) : [];
-  const box = el('warnings');
+  // A partial export must never be one click away. The primary button is
+  // withdrawn entirely and replaced by an explicitly-labelled second action, so
+  // nobody can archive a truncated chat without having read why it is truncated.
+  const partial = incompleteWarning(c);
+  el('partial').hidden = !partial;
+  el('download').hidden = Boolean(partial);
+  el('download-anyway').hidden = !partial;
+  if (partial) {
+    el('partial-text').textContent = partial
+      .slice(INCOMPLETE_PREFIX.length)
+      .replace(/^[\s—–-]+/, '');
+    el('partial-why').textContent = PARTIAL_EXPLANATION;
+  }
+
+  // The headline warning is already shown above; don't repeat it in the list.
+  const warnings = (Array.isArray(c.warnings) ? c.warnings.filter(Boolean) : []).filter(
+    (w) => w !== partial,
+  );
   const list = el('warning-list');
   list.replaceChildren(
     ...warnings.map((w) => {
@@ -179,11 +210,22 @@ function renderReady(c) {
       return li;
     }),
   );
-  box.hidden = warnings.length === 0;
+  el('warnings').hidden = warnings.length === 0;
 
   setStatus('');
   show('ready');
 }
+
+/**
+ * Calm and factual, and deliberately quotes no totals: turn indices are not
+ * global message ordinals, so any number we could name would understate the
+ * loss (Agent A, docs/HANDOFF.md).
+ */
+const PARTIAL_EXPLANATION =
+  `${PLATFORM.siteName} keeps only part of a long conversation loaded in the page, so an export `
+  + 'read from the page can only contain what was there. That is a limitation of the site, not a '
+  + `bug in ${PLATFORM.productName}. Signing in at ${PLATFORM.siteHost} and reopening this chat `
+  + `lets ${PLATFORM.productName} read the whole conversation instead.`;
 
 function metaLine(c) {
   const shown = countRendered(c);
@@ -242,7 +284,9 @@ function currentOptions() {
   for (const key of OPTION_IDS) {
     const input = optionInput(key);
     if (!input) continue;
-    o[key] = input.type === 'checkbox' ? input.checked : input.value;
+    const pair = CHECKBOX_ENUMS[key];
+    if (pair) o[key] = input.checked ? pair[0] : pair[1];
+    else o[key] = input.type === 'checkbox' ? input.checked : input.value;
   }
   if (o.headingStyle !== 'bold') o.headingStyle = 'h2';
   return o;
@@ -272,7 +316,9 @@ async function loadOptions() {
     const input = optionInput(key);
     if (!input) continue;
     const value = stored[key] !== undefined ? stored[key] : DEFAULT_OPTIONS[key];
-    if (input.type === 'checkbox') input.checked = Boolean(value);
+    const pair = CHECKBOX_ENUMS[key];
+    if (pair) input.checked = value !== pair[1];
+    else if (input.type === 'checkbox') input.checked = Boolean(value);
     else input.value = value === 'bold' ? 'bold' : 'h2';
   }
 }
@@ -289,9 +335,9 @@ async function saveOptions() {
  * actions
  * ------------------------------------------------------------------ */
 
-async function onDownload() {
+async function onDownload(buttonId = 'download') {
   if (!conversation) return;
-  const button = el('download');
+  const button = el(buttonId);
   button.disabled = true;
   setStatus('Saving…');
   try {

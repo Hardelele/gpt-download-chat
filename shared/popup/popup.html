@@ -40,6 +40,12 @@
         <h2 class="chat-title" id="chat-title"></h2>
         <p class="meta" id="chat-meta"></p>
 
+        <div class="danger" id="partial" hidden>
+          <p class="danger-head">Incomplete export</p>
+          <p class="danger-what" id="partial-text"></p>
+          <p class="danger-why" id="partial-why"></p>
+        </div>
+
         <div class="notice" id="warnings" hidden>
           <b>Heads up</b>
           <ul id="warning-list"></ul>
@@ -47,6 +53,9 @@
 
         <div class="actions">
           <button class="btn btn-primary" id="download" type="button">Download .md</button>
+          <button class="btn btn-danger" id="download-anyway" type="button" hidden>
+            Download the partial export anyway
+          </button>
           <button class="btn btn-secondary" id="copy" type="button">Copy to clipboard</button>
         </div>
         <p class="status" id="status" role="status" aria-live="polite"></p>
@@ -59,6 +68,13 @@
               <span>
                 YAML frontmatter
                 <small>title, model, dates, message count</small>
+              </span>
+            </label>
+            <label class="row">
+              <input type="checkbox" id="opt-mathDelimiters" />
+              <span>
+                Convert math to $…$
+                <small>what Obsidian and MathJax expect, instead of \(…\)</small>
               </span>
             </label>
             <label class="row">

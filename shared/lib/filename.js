@@ -11,8 +11,11 @@
  *   - always ends in `.md`
  */
 
+import { incompleteWarning } from './markdown.js';
+
 const MAX_BASE = 80;
 const FALLBACK = 'chatgpt-conversation';
+const PARTIAL_SUFFIX = '-partial';
 
 // CON, PRN, AUX, NUL, COM0-9, LPT0-9 — reserved on Windows with or without an extension.
 const RESERVED = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/i;
@@ -37,6 +40,11 @@ export function buildFilename(conversation) {
 
   base = capLength(base, MAX_BASE);
   if (RESERVED.test(base)) base = `chat-${base}`;
+
+  // A partial export is marked on disk too. Six months later the file is all
+  // that is left of this decision, and "is my backup complete?" has to be
+  // answerable without opening it.
+  if (incompleteWarning(c)) base += PARTIAL_SUFFIX;
 
   const date = datePrefix(c.createTime, c.updateTime);
   return `${date ? `${date}-` : ''}${base}.md`;

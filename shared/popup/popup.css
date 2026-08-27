@@ -14,6 +14,11 @@
   --warn-bg: #fff8e6;
   --warn-line: #f0d79a;
   --warn-fg: #7a5a11;
+  --danger-bg: #fdf1ef;
+  --danger-line: #f0cdc7;
+  --danger-accent: #b3341f;
+  --danger-fg: #6d2417;
+  --danger-fg-muted: #8a4437;
   --err: #c0392b;
   --radius: 8px;
 }
@@ -31,6 +36,11 @@
     --warn-bg: #2c2618;
     --warn-line: #4d4127;
     --warn-fg: #e0c483;
+    --danger-bg: #2e1c19;
+    --danger-line: #4d2b25;
+    --danger-accent: #ff9179;
+    --danger-fg: #f0cec6;
+    --danger-fg-muted: #c9a196;
     --err: #ff8a7a;
   }
 }
@@ -196,6 +206,38 @@ body {
   margin-top: 2px;
 }
 
+/* Partial-export refusal. Deliberately the loudest thing in the popup: a
+   silently truncated file is this category's defining failure. */
+.danger {
+  margin: 0 0 12px;
+  padding: 9px 11px;
+  border: 1px solid var(--danger-line);
+  border-left: 3px solid var(--danger-accent);
+  border-radius: var(--radius);
+  background: var(--danger-bg);
+  color: var(--danger-fg);
+  font-size: 11.5px;
+}
+
+.danger p {
+  margin: 0;
+}
+
+.danger-head {
+  font-weight: 700;
+  color: var(--danger-accent);
+  margin-bottom: 3px !important;
+}
+
+.danger-what {
+  margin-bottom: 6px !important;
+}
+
+.danger-why {
+  color: var(--danger-fg-muted);
+  line-height: 1.4;
+}
+
 .actions {
   display: grid;
   gap: 6px;
@@ -229,6 +271,22 @@ body {
 
 .btn-primary:hover:not(:disabled) {
   background: var(--accent-hover);
+}
+
+/* Never the visual default: an opt-in for a file the user has been told is
+   incomplete. Outlined rather than filled, so it does not read as "the button". */
+.btn-danger {
+  background: transparent;
+  border-color: var(--danger-accent);
+  color: var(--danger-accent);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--danger-bg);
+}
+
+.btn-danger:focus-visible {
+  outline-color: var(--danger-accent);
 }
 
 .btn-secondary {

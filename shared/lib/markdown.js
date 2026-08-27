@@ -23,6 +23,7 @@ export const EXPORTER_VERSION = '0.1.0';
  * @property {'h2'|'bold'} headingStyle
  * @property {string} userLabel
  * @property {string} assistantLabel
+ * @property {'dollar'|'preserve'} mathDelimiters
  */
 
 /** @type {RenderOptions} */
@@ -35,9 +36,33 @@ export const DEFAULT_OPTIONS = Object.freeze({
   headingStyle: 'h2',
   userLabel: 'You',
   assistantLabel: 'ChatGPT',
+  mathDelimiters: 'dollar',
 });
 
 const FALLBACK_TITLE = 'ChatGPT conversation';
+
+/**
+ * Sentinel that the extractors put at the front of a warning when they know the
+ * transcript they recovered is only part of the conversation.
+ *
+ * Defined here, in the shared renderer, because the popup and the renderer both
+ * need it and neither may import a platform-specific extractor. Agent A owns the
+ * producing copy in `dom-scrape.js`; `test/markdown.test.mjs` asserts the two
+ * strings are identical, so a reword on either side fails the build rather than
+ * silently disarming the refusal.
+ */
+export const INCOMPLETE_PREFIX = 'INCOMPLETE EXPORT';
+
+/**
+ * The headline warning explaining why an export is partial, or '' when it is not.
+ * @param {object|null|undefined} conversation
+ * @returns {string}
+ */
+export function incompleteWarning(conversation) {
+  const list = conversation && Array.isArray(conversation.warnings) ? conversation.warnings : [];
+  const hit = list.find((w) => typeof w === 'string' && w.startsWith(INCOMPLETE_PREFIX));
+  return hit || '';
+}
 
 /* eslint-disable no-control-regex */
 const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
@@ -71,6 +96,15 @@ export function toMarkdown(conversation, opts) {
 
   blocks.push(`# ${headingSafe(title)}`);
 
+  // A truncated file that looks complete is this category's defining failure, so
+  // say so at the top, where it cannot be missed, not only in the notes footer.
+  // `> [!WARNING]` is a callout in Obsidian and on GitHub and degrades to an
+  // ordinary blockquote everywhere else.
+  const partial = incompleteWarning(c);
+  if (partial) {
+    blocks.push(`> [!WARNING]\n> **Incomplete export.** ${headingSafe(stripPrefix(partial))}`);
+  }
+
   visible.forEach((m, i) => {
     if (useRules && i > 0) blocks.push('---');
     blocks.push(renderMessage(m, o));
@@ -80,9 +114,15 @@ export function toMarkdown(conversation, opts) {
 
   const warnings = Array.isArray(c.warnings) ? c.warnings.filter((w) => nonEmptyString(w)) : [];
   if (warnings.length) {
+    // Incomplete-export warnings lead; they are the ones that change what the
+    // reader should believe about the file.
+    const ordered = [
+      ...warnings.filter((w) => w.startsWith(INCOMPLETE_PREFIX)),
+      ...warnings.filter((w) => !w.startsWith(INCOMPLETE_PREFIX)),
+    ];
     blocks.push('---');
     blocks.push(
-      ['> **Export notes**', '>', ...warnings.map((w) => `> - ${headingSafe(w)}`)].join('\n'),
+      ['> **Export notes**', '>', ...ordered.map((w) => `> - ${headingSafe(w)}`)].join('\n'),
     );
   }
 
@@ -103,6 +143,7 @@ function resolveOptions(opts) {
     else if (typeof def === 'string') o[key] = String(src[key]);
   }
   if (o.headingStyle !== 'bold') o.headingStyle = 'h2';
+  if (o.mathDelimiters !== 'preserve') o.mathDelimiters = 'dollar';
   if (!o.userLabel.trim()) o.userLabel = DEFAULT_OPTIONS.userLabel;
   if (!o.assistantLabel.trim()) o.assistantLabel = DEFAULT_OPTIONS.assistantLabel;
   // internal, test-only: pins the `exported:` stamp
@@ -153,6 +194,8 @@ function renderFrontmatter(c, title, messageCount, o) {
   put('created', isoFromUnix(c.createTime));
   put('updated', isoFromUnix(c.updateTime));
   put('messages', String(messageCount));
+  // Only ever emitted when true, so a script can trust its presence.
+  if (incompleteWarning(c)) put('incomplete', 'true');
   put('exported', nowIso(o));
   put('exported_with', yamlString(`${EXPORTER_NAME} v${EXPORTER_VERSION}`));
 
@@ -204,7 +247,7 @@ function renderMessage(m, o) {
     if (ts) parts.push(`*${ts}*`);
   }
 
-  const body = tidyBody(m.text);
+  const body = tidyBody(o.mathDelimiters === 'dollar' ? convertMathDelimiters(m.text) : m.text);
   if (body) parts.push(body);
 
   const attachments = renderAttachments(m.attachments);
@@ -268,6 +311,189 @@ function isRenderableUrl(url) {
 function linkTarget(url) {
   const clean = url.replace(/\s/g, '%20').replace(/</g, '%3C').replace(/>/g, '%3E');
   return /[()]/.test(clean) ? `<${clean}>` : clean;
+}
+
+/* ------------------------------------------------------------------ *
+ * LaTeX delimiter normalisation
+ * ------------------------------------------------------------------ */
+
+/**
+ * Rewrites ChatGPT's LaTeX delimiters into the dollar form that Obsidian,
+ * MathJax and most Markdown renderers expect:
+ *
+ *     \( x \)   ->  $x$
+ *     \[ x \]   ->  $$x$$
+ *
+ * Code is sacred: fenced blocks and inline-code spans are never touched, so a
+ * shell script containing `\(` survives byte-for-byte.
+ *
+ * The scan is deliberately timid — anything it is not sure about is left
+ * exactly as it was. It refuses to convert when:
+ *   - the delimiter's backslash is itself escaped (`\\(` is a literal paren)
+ *   - there is no matching closer (unbalanced)
+ *   - the span would contain a blank line (that is prose, not math)
+ *   - the span already contains a `$` (converting could produce broken output)
+ *   - the span is empty
+ *
+ * @param {unknown} text
+ * @returns {string} the text, with `\(`/`\[` spans converted outside code
+ */
+export function convertMathDelimiters(text) {
+  if (typeof text !== 'string' || text === '') return '';
+  if (!text.includes('\\(') && !text.includes('\\[')) return text; // fast path
+  return splitOutFences(text)
+    .map((seg) => (seg.code ? seg.text : convertOutsideInlineCode(seg.text)))
+    .join('');
+}
+
+/**
+ * Split a body into fenced-code and non-code segments, preserving every byte.
+ * @param {string} text
+ * @returns {{code: boolean, text: string}[]}
+ */
+function splitOutFences(text) {
+  const lines = text.split('\n');
+  const segments = [];
+  let buffer = [];
+  let inCode = false;
+  let fence = null;
+
+  const flush = (code) => {
+    if (buffer.length) segments.push({ code, text: buffer.join('\n') });
+    buffer = [];
+  };
+
+  for (const line of lines) {
+    if (inCode) {
+      buffer.push(line);
+      if (isFenceClose(line, fence)) {
+        flush(true);
+        inCode = false;
+        fence = null;
+      }
+      continue;
+    }
+    const open = openingFence(line);
+    if (open) {
+      flush(false);
+      inCode = true;
+      fence = open;
+      buffer.push(line);
+      continue;
+    }
+    buffer.push(line);
+  }
+  flush(inCode);
+
+  // `join('\n')` inside each segment loses the newline that separated two
+  // segments, so stitch them back with the separators they were split on.
+  return segments.map((seg, i) => (i === 0 ? seg : { ...seg, text: `\n${seg.text}` }));
+}
+
+/** Convert the plain runs of a non-code segment, skipping `` `inline code` ``. */
+function convertOutsideInlineCode(segment) {
+  let out = '';
+  let plainStart = 0;
+  let i = 0;
+
+  while (i < segment.length) {
+    if (segment[i] !== '`') {
+      i += 1;
+      continue;
+    }
+    let run = 0;
+    while (segment[i + run] === '`') run += 1;
+    const closer = findBacktickRun(segment, i + run, run);
+    if (closer === -1) {
+      i += run; // unmatched backticks are ordinary text
+      continue;
+    }
+    out += convertSpans(segment.slice(plainStart, i));
+    out += segment.slice(i, closer + run); // the code span, verbatim
+    i = closer + run;
+    plainStart = i;
+  }
+
+  return out + convertSpans(segment.slice(plainStart));
+}
+
+/** Index of the next backtick run of exactly `length`, or -1. */
+function findBacktickRun(text, from, length) {
+  for (let i = from; i < text.length; i += 1) {
+    if (text[i] !== '`') continue;
+    let run = 0;
+    while (text[i + run] === '`') run += 1;
+    if (run === length) return i;
+    i += run - 1;
+  }
+  return -1;
+}
+
+/** The actual delimiter rewrite, over a run of text known to be plain prose. */
+function convertSpans(text) {
+  if (text === '') return '';
+  let out = '';
+  let i = 0;
+
+  while (i < text.length) {
+    if (text[i] !== '\\') {
+      out += text[i];
+      i += 1;
+      continue;
+    }
+
+    let slashes = 0;
+    while (text[i + slashes] === '\\') slashes += 1;
+    const next = text[i + slashes];
+    const display = next === '[';
+
+    // Only an ODD run of backslashes leaves one free to pair with the bracket:
+    // `\(` opens math, `\\(` is an escaped backslash before a literal paren.
+    if ((display || next === '(') && slashes % 2 === 1) {
+      const contentStart = i + slashes + 1;
+      const closer = findMathCloser(text, contentStart, display ? ']' : ')');
+      if (closer !== -1) {
+        const wrapped = wrapMath(text.slice(contentStart, closer), display);
+        if (wrapped !== null) {
+          out += text.slice(i, i + slashes - 1); // backslashes not part of the delimiter
+          out += wrapped;
+          i = closer + 2; // past the closing `\)` / `\]`
+          continue;
+        }
+      }
+    }
+
+    out += text.slice(i, i + slashes);
+    i += slashes;
+  }
+
+  return out;
+}
+
+/** Index of the backslash of the next unescaped `\)` / `\]`, or -1. */
+function findMathCloser(text, from, bracket) {
+  for (let i = from; i < text.length; i += 1) {
+    if (text[i] !== '\\') continue;
+    let slashes = 0;
+    while (text[i + slashes] === '\\') slashes += 1;
+    if (text[i + slashes] === bracket && slashes % 2 === 1) return i + slashes - 1;
+    i += slashes - 1;
+  }
+  return -1;
+}
+
+/**
+ * `null` means "refuse, leave the original alone".
+ * Horizontal whitespace next to the delimiters is dropped (`\( x \)` -> `$x$`,
+ * which Obsidian requires) but newlines are kept, so multi-line display math
+ * keeps its shape.
+ */
+function wrapMath(content, display) {
+  const trimmed = content.replace(/^[ \t]+/, '').replace(/[ \t]+$/, '');
+  if (trimmed.trim() === '') return null; // empty span
+  if (trimmed.includes('$')) return null; // would collide with the new delimiter
+  if (/\n[ \t]*\n/.test(trimmed)) return null; // spans a paragraph break: prose, not math
+  return display ? `$$${trimmed}$$` : `$${trimmed}$`;
 }
 
 /* ------------------------------------------------------------------ *
@@ -369,6 +595,11 @@ function bodyCollidesWithHeading(text, style) {
 /* ------------------------------------------------------------------ *
  * small helpers
  * ------------------------------------------------------------------ */
+
+/** Drop the machine-readable sentinel and any separator that followed it. */
+function stripPrefix(warning) {
+  return warning.slice(INCOMPLETE_PREFIX.length).replace(/^[\s—–-]+/, '');
+}
 
 function nonEmptyString(v) {
   return typeof v === 'string' && v.trim() !== '' ? v.trim() : '';
