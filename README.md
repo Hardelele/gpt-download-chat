@@ -1,9 +1,10 @@
 <img src="extension/icons/icon128.png" width="72" alt="">
 
-# Chat2MD — save ChatGPT chats as Markdown
+# Chat2MD — save AI chats as Markdown
 
-A Chrome (MV3) extension that exports a **whole** ChatGPT conversation to a clean `.md`
-file. One click, no account, no server, nothing uploaded.
+Four Chrome (MV3) extensions, one shared codebase, that export a **whole** conversation to a
+clean `.md` file — from ChatGPT, claude.ai, Gemini, or AI Mode in Google Search. One click,
+no account, no server, nothing uploaded.
 
 [![CI](https://github.com/hardelele/gpt-download-chat/actions/workflows/ci.yml/badge.svg)](https://github.com/hardelele/gpt-download-chat/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -46,29 +47,41 @@ git clone https://github.com/hardelele/gpt-download-chat
 cd gpt-download-chat
 ```
 
+```bash
+npm run build          # composes all four, or: npm run build -- chatgpt
+```
+
 1. Open `chrome://extensions`.
 2. Turn on **Developer mode** (top right).
 3. Click **Load unpacked**.
-4. Select the `extension/` folder in the cloned repo.
+4. Select `dist/chat2md-chatgpt-<version>/` (or `-claude`, `-gemini`, `-aimode`).
 5. Open a conversation on `chatgpt.com`, click the Chat2MD icon, click **Download .md**.
 
-There is no build step for development — the extension ships plain ES modules with no
-bundler and no dependencies, so what you load is what you read.
+The build step exists only to *compose* — it copies files and generates a manifest, an icon
+set and a `platform.js`. It ships plain ES modules with no bundler, no transpiler and no
+dependencies, so what you load is still what you read.
 
 ## Build
 
 Node 20+ (CI runs 22). No dependencies to install — `npm install` is not required.
 
 ```bash
-npm test        # node --test, the whole suite
-npm run verify  # pre-publish gate: manifest, icons, permissions, no remote code
-npm run build   # verify, stage into dist/, and write dist/chat2md-<version>.zip
-npm run icons   # regenerate the PNG icons from scripts/make-icons.mjs
-npm run screenshots  # render the 1280x800 store screenshots with headless Chrome
+npm test              # node --test, the whole suite
+npm run build         # compose + verify + zip all four store items
+npm run build -- claude   # ...or just one of them
+npm run platforms     # print the platform table
+npm run verify -- --dir dist/chat2md-claude-0.1.0   # the gate on its own
+npm run icons         # regenerate the PNG icons from scripts/make-icons.mjs
+npm run screenshots   # render the 1280x800 store screenshots with headless Chrome
 ```
 
-`npm run build` produces a Web Store-ready archive with `manifest.json` at the **root** of
-the zip, then reads the archive back and checks its central directory before declaring
+Four extensions share one shell. `shared/` holds the parts that are identical everywhere —
+renderer, filename builder, popup, service worker, content bridge — and
+[`platforms.config.mjs`](platforms.config.mjs) is the table of what differs: display name,
+description, host permissions, extractor directory, assistant label and icon accent.
+`npm run build` composes each item into `dist/<name>-<version>/`, runs `scripts/verify.mjs`
+against the *staged package*, and zips it with `manifest.json` at the **root** of the
+archive, then reads the archive back and checks its central directory before declaring
 success. The zip writer and the PNG encoder are both hand-rolled on `node:zlib` — this
 repository has no third-party code in it at all.
 
@@ -93,7 +106,7 @@ already signed in to, exactly as the page itself does.
 
 `scripts/verify.mjs` enforces this mechanically on every build: it fails if a remote script
 reference, an `eval(`, a `new Function(`, an `<all_urls>` host permission, or a URL to a host
-the manifest does not declare appears anywhere under `extension/`.
+the manifest does not declare appears anywhere in the staged package.
 
 Full policy: [`PRIVACY.md`](PRIVACY.md) ·
 published at <https://hardelele.github.io/gpt-download-chat/privacy.html>
@@ -101,13 +114,20 @@ published at <https://hardelele.github.io/gpt-download-chat/privacy.html>
 ## Related builds
 
 The same renderer, popup and build pipeline back three sibling extensions for other
-assistants — see [`CONTRACT-PLATFORMS.md`](CONTRACT-PLATFORMS.md). Only the extractor, the
-manifest and the store copy differ per platform.
+assistants — see [`CONTRACT-PLATFORMS.md`](CONTRACT-PLATFORMS.md). Only the extractor and
+one row of [`platforms.config.mjs`](platforms.config.mjs) differ per platform.
+
+| id | site | package |
+| --- | --- | --- |
+| `chatgpt` | chatgpt.com, chat.openai.com | `dist/chat2md-chatgpt-<version>.zip` |
+| `claude` | claude.ai | `dist/chat2md-claude-<version>.zip` |
+| `gemini` | gemini.google.com, aistudio.google.com | `dist/chat2md-gemini-<version>.zip` |
+| `aimode` | AI Mode in Google Search | `dist/chat2md-aimode-<version>.zip` |
 
 ## Contributing
 
-Issues and pull requests welcome. Run `npm test && npm run verify` before opening one; CI
-runs exactly that plus `npm run build`.
+Issues and pull requests welcome. Run `npm test && npm run build` before opening one; that
+is exactly what CI runs.
 
 ## License
 
