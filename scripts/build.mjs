@@ -136,6 +136,45 @@ function normaliseImports(stageDir) {
   return touched;
 }
 
+/**
+ * The store dashboard and the manifest must agree on the item name and the short
+ * description. A mismatch is a documented review-delay cause, and it is invisible
+ * until a human diffs two files by eye — so diff it here instead.
+ *
+ * Reads the first fenced block under `## Item name` and under
+ * `## Short description`, which is the shape every store/**\/listing.md uses.
+ */
+function checkListing(p) {
+  const path = join(ROOT, ...p.listing.split('/'));
+  if (!existsSync(path)) return [`${p.listing} is missing`];
+
+  const md = readFileSync(path, 'utf8');
+  const block = (heading) => {
+    const at = md.indexOf(`## ${heading}`);
+    if (at === -1) return null;
+    const open = md.indexOf('```', at);
+    if (open === -1) return null;
+    const start = md.indexOf('\n', open) + 1;
+    const close = md.indexOf('```', start);
+    return close === -1 ? null : md.slice(start, close).trim();
+  };
+
+  const problems = [];
+  for (const [heading, expected, field] of [
+    ['Item name', p.name, 'name'],
+    ['Short description', p.description, 'description'],
+  ]) {
+    const found = block(heading);
+    if (found === null) problems.push(`${p.listing}: no fenced block under "## ${heading}"`);
+    else if (found !== expected) {
+      problems.push(
+        `${p.listing}: "## ${heading}" says\n      ${JSON.stringify(found)}\n    but platforms.config.mjs ${field} is\n      ${JSON.stringify(expected)}`
+      );
+    }
+  }
+  return problems;
+}
+
 function run(label, args) {
   try {
     return execFileSync(process.execPath, args, {
@@ -342,6 +381,13 @@ function build(p) {
   if (ZIP_ONLY) {
     console.log('  verify   skipped (--zip-only)');
   } else {
+    const listingProblems = checkListing(p);
+    if (listingProblems.length) {
+      for (const m of listingProblems) console.error(`    ${m}`);
+      throw new Error('store listing does not match the manifest');
+    }
+    console.log(`  listing  ${p.listing} agrees with the manifest`);
+
     const out = run('verify', [join(ROOT, 'scripts', 'verify.mjs'), '--dir', stageRel]);
     process.stdout.write(out.replace(/^/gm, '  '));
   }

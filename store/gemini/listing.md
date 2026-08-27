@@ -11,14 +11,20 @@ dashboard (**Store listing** tab). Character counts are the store's hard limits.
 
 ## Item name
 
-*Limit 75 characters. Currently 43.*
+*Limit 75 characters. Currently 44.*
 
 ```
-Chat2MD for Gemini — Save chats as Markdown
+Chat2MD for Gemini™ — Save chats as Markdown
 ```
 
-> Must match `extensions/gemini/manifest.json` → `name`. It does.
-> If one changes, change both, or `scripts/verify.mjs` will fail the build.
+> Generated from the `gemini` entry in `platforms.config.mjs`; `npm run build` writes the
+> same string into `extensions/gemini/manifest.json` → `name`. Change the config, not the
+> manifest.
+>
+> **The ™ is required, and it must be ™ and never ®.** Google's brand-feature guidelines
+> permit a third party to say "<product> for Gemini™" provided the symbol is present and
+> the listing carries an attribution plus a non-affiliation statement — both are in the
+> TRADEMARKS paragraph of the detailed description. Our own brand still leads the name.
 
 ---
 
@@ -110,7 +116,9 @@ PRICING
 
 Free. No paid tier, no trial, no upsell.
 
-Chat2MD is an independent project. It is not affiliated with, endorsed by, or sponsored by Google.
+TRADEMARKS
+
+Google, Gemini and Google AI Studio are trademarks of Google LLC. Chat2MD is an independent project and is not affiliated with, endorsed by, or sponsored by Google.
 ```
 
 *Word count: ~640. Benefit-led, no emoji, no keyword stuffing.*

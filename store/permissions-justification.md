@@ -44,7 +44,7 @@ The user invokes Chat2MD by clicking its toolbar icon while looking at a convers
 ## `scripting`
 
 ```
-The conversation data lives inside the ChatGPT page, in the context of the user's logged-in session. To read it, Chat2MD injects its own extraction module into that page with chrome.scripting.executeScript() when the user clicks the button. Every injected file is bundled inside the extension package (extension/src/lib/*.js) — nothing is fetched from a remote server, nothing is evaluated from a string, and the extension declares a content security policy of "script-src 'self'; object-src 'self'". Injection happens only into the tab the user activated, only on chatgpt.com and chat.openai.com, and only in response to the user's click; the extension has no content script that runs automatically on page load.
+The conversation data lives inside the ChatGPT page, in the context of the user's logged-in session. To read it, Chat2MD injects its own extraction module into that page with chrome.scripting.executeScript() when the user clicks the button. Every injected file is bundled inside the extension package (src/lib/*.js) — nothing is fetched from a remote server, nothing is evaluated from a string, and the extension declares a content security policy of "script-src 'self'; object-src 'self'". Injection happens only into the tab the user activated, only on chatgpt.com and chat.openai.com, and only in response to the user's click; the extension has no content script that runs automatically on page load.
 ```
 
 ---
@@ -52,7 +52,7 @@ The conversation data lives inside the ChatGPT page, in the context of the user'
 ## `storage`
 
 ```
-Chat2MD offers a handful of export options — whether to include a YAML front-matter block, per-message timestamps, system messages, tool calls and the assistant's reasoning steps, and which heading style and speaker labels to use. chrome.storage.local remembers the user's choices so they do not have to reset them on every export. Only these render settings are stored: a small object of booleans and short strings. No conversation content, no URLs, no personal data and no identifiers are ever written to storage, and nothing in storage is ever transmitted anywhere — it is read only by the extension's own popup, on the user's own machine.
+Chat2MD offers a handful of export options — whether to include a YAML front-matter block, per-message timestamps, system messages, tool calls and the assistant's reasoning steps, and which heading style and speaker labels to use. chrome.storage.sync remembers the user's choices so they do not have to reset them on every export. Only these render settings are stored: a small object of booleans and short strings. No conversation content, no URLs, no personal data and no identifiers are ever written to storage, and nothing in storage is ever transmitted anywhere — it is read only by the extension's own popup, on the user's own machine.
 ```
 
 ---

@@ -12,13 +12,15 @@ dashboard (**Store listing** tab). Character counts are the store's hard limits.
 
 ## Item name
 
-*Limit 75 characters. Currently 49.*
+*Limit 75 characters. Currently 50.*
 
 ```
-Chat2MD for AI Mode — Save AI answers as Markdown
+Chat2MD for AI Mode™ — Save AI answers as Markdown
 ```
 
-> Must match `extensions/aimode/manifest.json` → `name`. It does.
+> Generated from the `aimode` entry in `platforms.config.mjs`; `npm run build` writes the
+> same string into `extensions/aimode/manifest.json` → `name`. Change the config, not the
+> manifest.
 >
 > **Naming is deliberate and must not be "improved".** Google's brand rules forbid using a
 > Google trademark as the name of a third-party product; the accepted phrasing for a
@@ -194,13 +196,20 @@ The dashboard asks for a sentence per permission. These match
 | `downloads` | Used to write the generated Markdown file to the user's Downloads folder. This is the extension's only output. |
 | `activeTab` | Used to read the AI Mode thread in the tab the user clicked the extension on, and only at that moment. |
 | `scripting` | Used to inject the extraction script into the active Google Search tab so the answer and its citations can be read and converted in the page. |
+| `storage` | Used to remember the user's own export preferences (front matter, timestamps, whether to include tool calls) between uses. Nothing else is stored, and nothing leaves the browser. |
 | `https://www.google.com/search*` | The AI Mode tab of Google Search, where AI Mode threads and AI Overviews are rendered. The extension reads the page the user is already viewing. |
 | `https://www.google.com/ai*` | Google's own entry point for AI Mode. Same purpose as above. |
 
 > The host permissions are deliberately path-scoped rather than `https://www.google.com/*`:
 > the extension has no business on Gmail, Drive, Docs, Maps or any other Google property,
-> and a reviewer who sees a narrow pattern asks fewer questions. `storage` is **not**
-> requested by this item — it has no options to remember. `<all_urls>` is never requested.
+> and a reviewer who sees a narrow pattern asks fewer questions. `<all_urls>` is never
+> requested.
+>
+> `storage` **is** requested, and was added by the orchestrator after this file was first
+> written. The shared popup persists the user's render options through
+> `chrome.storage.sync` the moment it opens (`shared/popup/popup.js`), so an item without
+> the permission would ship a popup that throws. All four items request the same four
+> permissions for that reason — see `platforms.config.mjs` → `manifestFor()`.
 
 **Single purpose statement:** "Export the AI Mode answer thread the user is currently
 viewing on Google Search to a Markdown file on their own computer, with its source

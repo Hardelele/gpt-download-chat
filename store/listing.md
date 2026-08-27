@@ -11,14 +11,20 @@ dashboard (**Store listing** tab). Character counts are the store's hard limits.
 
 ## Item name
 
-*Limit 75 characters. Currently 40.*
+*Limit 75 characters. Currently 35.*
 
 ```
-Chat2MD — Save ChatGPT chats as Markdown
+Chat2MD — Save AI chats as Markdown
 ```
 
-> Must match `manifest.json` → `name`. It currently does. If one changes, change both,
-> or `scripts/verify.mjs` and the reviewer will both notice.
+> Generated from the `chatgpt` entry in `platforms.config.mjs`; `npm run build` writes the
+> same string into `extension/manifest.json` → `name`. Change the config, not either copy.
+>
+> **Do not put "ChatGPT" in this field.** OpenAI's brand guidelines say not to build their
+> marks into a product or company name. The mark belongs in the *description*, where it
+> describes compatibility, together with the TRADEMARKS paragraph below. This is the same
+> rule the Claude item follows; the two Google items differ only because Google explicitly
+> blesses the "… for Gemini™" construction.
 
 ---
 
@@ -89,6 +95,10 @@ Chat2MD has no server, because it does not need one. The conversion happens insi
 • No remote code: every line of JavaScript ships inside the package and can be read before you install it.
 
 Chat2MD requests access to chatgpt.com and chat.openai.com and to no other website.
+
+TRADEMARKS
+
+Chat2MD is an independent, unofficial tool. ChatGPT and OpenAI are trademarks of OpenAI, L.L.C. This extension is not affiliated with, endorsed by, or sponsored by OpenAI.
 
 OPEN SOURCE
 

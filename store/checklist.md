@@ -68,7 +68,8 @@ everything below needs a person with a browser, a Google account and a credit ca
 
 Copy from `store/listing.md`:
 
-- [ ] **Item name** — `Chat2MD — Save ChatGPT chats as Markdown` (pulled from the manifest).
+- [ ] **Item name** — `Chat2MD — Save AI chats as Markdown` (pulled from the manifest, which
+      `npm run build` generates from `platforms.config.mjs`).
 - [ ] **Short description** — pulled from the manifest; do not edit it here, edit the manifest.
 - [ ] **Detailed description** — paste the block from `store/listing.md`. Plain text only;
       the field does not render Markdown or HTML.
@@ -133,10 +134,15 @@ Typical turnaround is **a few hours to three days**. These are what push it to o
 5. **Keyword stuffing or a misleading description.** Repeating "ChatGPT export markdown save
    download" gets the listing rejected for spam. The copy in `store/listing.md` is
    deliberately written as prose.
-6. **Trademark trouble in the name.** "Chat2MD — Save ChatGPT chats as Markdown" describes
-   compatibility rather than claiming affiliation, which is the safe form. Do **not** rename
-   it to anything that reads as first-party ("ChatGPT Exporter", "OpenAI Markdown"), and do
-   not use OpenAI's logo or wordmark in the icon or screenshots. Ours uses neither.
+6. **Trademark trouble in the name.** Item names are mark-free unless the mark's owner
+   blesses the construction. OpenAI and Anthropic do not, so the ChatGPT and Claude items are
+   named `Chat2MD — Save AI chats as Markdown` and `Chat2MD — AI Chat to Markdown`; the mark
+   appears only in the description, next to a TRADEMARKS non-affiliation paragraph. Google
+   does bless "… for Gemini™", so those two items are `Chat2MD for Gemini™ …` and
+   `Chat2MD for AI Mode™ …` — with ™, never ®, and with the attribution paragraph. Do **not**
+   rename anything to something that reads first-party ("ChatGPT Exporter", "Google AI
+   Export"), and do not use anyone's logo or wordmark in an icon or screenshot. Ours use
+   none. All four names live in `platforms.config.mjs`; edit them there.
 7. **A first submission from a brand-new developer account** is reviewed more slowly than
    subsequent ones. Expect the first one to be the slow one.
 8. **Screenshots that are not exactly 1280×800 or 640×400**, or that carry an alpha channel.
@@ -145,17 +151,28 @@ Typical turnaround is **a few hours to three days**. These are what push it to o
 ## After it is published
 
 - [ ] Tag the release: `git tag v0.1.0 && git push --tags`.
-- [ ] Attach `dist/chat2md-0.1.0.zip` to the GitHub release (CI also uploads it as a
-      build artifact on every run).
+- [ ] Attach the four `dist/chat2md-*-0.1.0.zip` packages to the GitHub release (CI also
+      uploads them as build artifacts on every run).
 - [ ] Put the store URL in `README.md` and replace the "install from source" framing.
-- [ ] For every later version: bump **both** `package.json` and `extension/manifest.json` —
-      `npm run build` refuses to package if the two disagree — add a `CHANGELOG.md` entry,
-      then upload the new zip as a new package in the same item.
+- [ ] For every later version: bump `package.json` only — every manifest inherits that
+      version, so the two can no longer disagree — add a `CHANGELOG.md` entry, then upload
+      the new zip as a new package in the same item.
 
 ## Sibling store items
 
 `CONTRACT-PLATFORMS.md` defines three more items (Claude, Gemini, AI Mode) sharing this
 codebase. Each is a **separate** store listing with its own screenshots and its own
 permission justifications, but the same developer account, the same $5 fee (paid once), and
-the **same privacy policy URL** — the policy is written to cover all of them. Build each with
-`node scripts/build.mjs --dir extensions/<platform>`.
+the **same privacy policy URL** — the policy is written to cover all of them.
+
+`npm run build` composes and verifies all four at once; `npm run build -- <id>` does one.
+`npm run platforms` prints the table. All four request the same four permissions
+(`downloads`, `activeTab`, `scripting`, `storage`) because they share one popup — keep every
+listing's permission table in step with `platforms.config.mjs` → `manifestFor()`.
+
+| id | package | item name |
+| --- | --- | --- |
+| `chatgpt` | `dist/chat2md-chatgpt-<version>.zip` | Chat2MD — Save AI chats as Markdown |
+| `claude` | `dist/chat2md-claude-<version>.zip` | Chat2MD — AI Chat to Markdown |
+| `gemini` | `dist/chat2md-gemini-<version>.zip` | Chat2MD for Gemini™ — Save chats as Markdown |
+| `aimode` | `dist/chat2md-aimode-<version>.zip` | Chat2MD for AI Mode™ — Save AI answers as Markdown |

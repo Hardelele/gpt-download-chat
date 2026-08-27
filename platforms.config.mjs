@@ -42,6 +42,7 @@ export const PRODUCT = 'Chat2MD';
  * @property {string[]} hostPermissions manifest `host_permissions`
  * @property {string[]} webAccessibleMatches  who may pull `src/lib/*.js`
  * @property {string}   sourceDir       the item's tree in git; owns `manifest.json`
+ * @property {string}   listing         store copy; its Item name / Short description must agree
  * @property {string}   extractorDir    directory whose contents become `src/lib/`
  * @property {string}   extractorEntry  the module `content.js` dynamically imports
  * @property {string}   assistantLabel  heading label inside the exported Markdown
@@ -57,6 +58,7 @@ export const PRODUCT = 'Chat2MD';
 export const PLATFORMS = [
   {
     id: 'chatgpt',
+    listing: 'store/listing.md',
     outputName: 'chat2md-chatgpt',
     name: 'Chat2MD — Save AI chats as Markdown',
     description:
@@ -86,6 +88,7 @@ export const PLATFORMS = [
 
   {
     id: 'claude',
+    listing: 'store/claude/listing.md',
     outputName: 'chat2md-claude',
     // Mark-free on purpose — see the naming rule at the top of this file.
     name: 'Chat2MD — AI Chat to Markdown',
@@ -119,6 +122,7 @@ export const PLATFORMS = [
 
   {
     id: 'gemini',
+    listing: 'store/gemini/listing.md',
     outputName: 'chat2md-gemini',
     // Google explicitly permits the "for <product>™" form with attribution.
     name: 'Chat2MD for Gemini™ — Save chats as Markdown',
@@ -152,6 +156,7 @@ export const PLATFORMS = [
 
   {
     id: 'aimode',
+    listing: 'store/aimode/listing.md',
     outputName: 'chat2md-aimode',
     name: 'Chat2MD for AI Mode™ — Save AI answers as Markdown',
     description:
