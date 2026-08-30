@@ -6,3 +6,7 @@ Thumbs.db
 npm-debug.log*
 .env
 .env.*
+
+# tooling scratch
+.playwright-mcp/
+.serena/

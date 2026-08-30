@@ -29,12 +29,21 @@ at least one, so those three cannot be submitted until someone captures them. Th
 files spell out what each shot must show. `npm run screenshots` only renders the ChatGPT set;
 it is not parameterised per platform.
 
-## The dashboard cannot be automated
+## Automating the dashboard — what works and what does not
 
-Chrome forbids extensions from scripting `chrome.google.com` (the extensions gallery), and the
-developer console is served from that origin. Browser automation gets
-*"The extensions gallery cannot be scripted"* and stops there. Every step below is a human at
-a keyboard — that is a Chrome restriction, not a missing credential.
+Two different routes, and they do not behave the same:
+
+- **Extension-based automation cannot touch it.** Chrome forbids extensions from injecting
+  into `chrome.google.com` (the extensions gallery), and the console is served from that
+  origin. Every action fails with *"The extensions gallery cannot be scripted"* — including
+  taking a screenshot, because that path is injection too.
+- **External automation (Playwright / CDP) reaches it fine.** It drives the browser from
+  outside rather than as an extension, so the gallery restriction does not apply. Verified:
+  the console loads and redirects to the normal Google sign-in.
+
+What is *not* automatable either way is the Google sign-in itself — the password, and any
+2FA, have to be typed by the account owner. Whether Google accepts a sign-in from an
+automation-controlled browser at all is unverified; it often challenges them.
 
 ---
 
