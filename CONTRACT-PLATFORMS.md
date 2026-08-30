@@ -20,7 +20,10 @@ Gemini and Google's AI Mode in Search are **separate products and separate store
 **Per-platform (the only genuinely new work per extension):**
 1. `extract.js` — produce the SAME `Conversation` typedef defined in `CONTRACT.md`. That typedef is
    platform-agnostic on purpose. Do not invent a different shape; the shared renderer consumes it.
-2. `manifest.json` — name, description, `host_permissions`, content-script matches.
+2. The platform's row in `platforms.config.mjs` — name, description, `host_permissions`, URL
+   patterns. `manifest.json` is **generated** from that row into the built package; there is no
+   per-platform manifest to write or check in, and a source tree must not contain one (a folder
+   with a manifest looks loadable to Chrome, and these are not).
 3. Store listing copy — name/description/screenshots for that item.
 
 The orchestrator hoists the shared modules into `shared/` and wires all three builds **after** the

@@ -14,10 +14,53 @@ import { join, dirname, relative, extname, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+/**
+ * With no `--dir`, verify every built package under dist/.
+ *
+ * This used to default to `extension`, which cannot pass and never could: the
+ * source trees hold only their extractor, and the shell they reference lives in
+ * shared/. So the default run always failed with two "missing shell file"
+ * errors that were true but unactionable — and a check that is always red is a
+ * check everyone learns to wave through. It got waved through.
+ *
+ * A package is any dist/ subdirectory with a manifest.json at its root.
+ */
 const argDir = (() => {
   const i = process.argv.indexOf('--dir');
-  return i !== -1 && process.argv[i + 1] ? process.argv[i + 1] : 'extension';
+  return i !== -1 && process.argv[i + 1] ? process.argv[i + 1] : null;
 })();
+
+if (argDir === null) {
+  const dist = join(ROOT, 'dist');
+  const packages = existsSync(dist)
+    ? readdirSync(dist, { withFileTypes: true })
+        .filter((e) => e.isDirectory() && existsSync(join(dist, e.name, 'manifest.json')))
+        .map((e) => `dist/${e.name}`)
+        .sort()
+    : [];
+
+  if (packages.length === 0) {
+    console.error('verify: no built packages under dist/ — run `npm run build` first.');
+    console.error('        (to check one tree explicitly: node scripts/verify.mjs --dir <path>)');
+    process.exit(1);
+  }
+
+  const { spawnSync } = await import('node:child_process');
+  const self = fileURLToPath(import.meta.url);
+  let failed = 0;
+  for (const pkg of packages) {
+    console.log(`\n=== ${pkg}`);
+    const r = spawnSync(process.execPath, [self, '--dir', pkg], { stdio: 'inherit' });
+    if (r.status !== 0) failed++;
+  }
+  console.log(
+    `\nverify: ${packages.length - failed}/${packages.length} package(s) OK` +
+      (failed ? `, ${failed} FAILED` : '')
+  );
+  process.exit(failed ? 1 : 0);
+}
+
 const EXT = join(ROOT, argDir);
 
 const errors = [];

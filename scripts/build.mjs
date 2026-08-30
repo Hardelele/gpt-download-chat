@@ -340,7 +340,17 @@ function build(p) {
   }
 
   /* 1. stage ------------------------------------------------------ */
-  rmSync(stageDir, { recursive: true, force: true });
+  // Clear the staging directory's *contents* but keep the directory itself.
+  // Chrome tracks a load-unpacked extension by path: delete the directory and a
+  // developer's dev-mode install is dropped from chrome://extensions, which
+  // looks exactly like the extension having been disabled and sends people
+  // hunting through Chrome instead of the build. Emptying it in place costs
+  // nothing and keeps that install alive across rebuilds (it still needs a
+  // Reload click to pick the new files up).
+  mkdirSync(stageDir, { recursive: true });
+  for (const entry of readdirSync(stageDir)) {
+    rmSync(join(stageDir, entry), { recursive: true, force: true });
+  }
   rmSync(zipPath, { force: true });
   mkdirSync(join(stageDir, 'src', 'lib'), { recursive: true });
 
@@ -357,18 +367,20 @@ function build(p) {
 
   const rewritten = normaliseImports(stageDir);
 
-  /* 1b. keep the checked-in manifest honest ----------------------- */
-  // The item's own manifest.json is a generated artifact now: it is what a
-  // reviewer reads in git and what `verify.mjs --dir <sourceDir>` sees, but the
-  // package always uses the freshly generated one above. Writing it back here
-  // is what makes "manifest and store listing disagree" structurally
-  // impossible. Edit platforms.config.mjs, never the manifest.
-  const srcManifest = join(ROOT, ...p.sourceDir.split('/'), 'manifest.json');
-  const generated = readFileSync(join(stageDir, 'manifest.json'), 'utf8');
-  if (!existsSync(srcManifest) || readFileSync(srcManifest, 'utf8') !== generated) {
-    writeFileSync(srcManifest, generated);
-    console.log(`  rewrote  ${p.sourceDir}/manifest.json from platforms.config.mjs`);
-  }
+  /* 1b. deliberately NOT written back to the source tree ---------- */
+  // This used to copy the generated manifest into `extension/` and each
+  // `extensions/<id>/`. Nothing reads those copies — but a folder containing a
+  // manifest.json is exactly what Chrome accepts for "Load unpacked", so they
+  // advertised those source trees as loadable extensions. They are not: the
+  // popup, the service worker, content.js, platform.js and lib/{markdown,
+  // filename}.js live in shared/ and only come together here. Chrome would load
+  // such a folder, fail to register the service worker, and leave a broken
+  // entry that reads as "the extension stopped working".
+  //
+  // With no manifest.json there, Chrome refuses the folder outright with
+  // "Manifest file is missing or unreadable" — a loud, correct error instead of
+  // a silent half-install. The manifest belongs in exactly one place: the built
+  // package. Edit platforms.config.mjs; `npm run platforms` prints the table.
 
   /* 2. icons ------------------------------------------------------ */
   run('icons', [join(ROOT, 'scripts', 'make-icons.mjs'), '--dir', stageRel, '--accent', p.accent]);

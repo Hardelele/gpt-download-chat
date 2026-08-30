@@ -1319,10 +1319,19 @@ this file keep working.
 
 ### Deliberately left undone
 
-- **`extension/` is not load-unpackable on its own** any more, and neither is any
+- ~~**`extension/` is not load-unpackable on its own** any more, and neither is any
   `extensions/<id>/`. They are source trees; the loadable thing is `dist/<name>-<version>/`.
   README's install section was updated. `npm run verify` with no `--dir` therefore fails now —
-  pass `--dir dist/chat2md-<id>-<version>`, or just run `npm run build`, which gates all four.
+  pass `--dir dist/chat2md-<id>-<version>`, or just run `npm run build`, which gates all four.~~
+  **RESOLVED.** Leaving it there cost a real day: the source trees still carried a generated
+  `manifest.json`, so Chrome accepted them for "Load unpacked" and then failed to register the
+  service worker — a dev-mode install that looked disabled rather than misloaded. And a bare
+  `npm run verify` that always failed trained everyone, including a later session, to read its
+  two true errors as a stale script. Both fixed: the generated manifest is no longer written
+  back to source trees (Chrome now refuses them with a clear "manifest missing"), and bare
+  `npm run verify` checks every built package under `dist/` and exits 0. A build also empties
+  `dist/<name>-<version>/` in place instead of deleting it, so a dev-mode install survives a
+  rebuild — verified by the directory keeping its NTFS file id across one.
 - **`extension/icons/` and `extensions/claude/icons/` are now dead weight.** The build generates
   a fresh, per-platform-tinted set into each package via Agent C's `make-icons --dir --accent`.
   I left the checked-in PNGs alone because they belong to Agents C and D and both were live;
