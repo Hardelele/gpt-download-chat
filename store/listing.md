@@ -11,20 +11,25 @@ dashboard (**Store listing** tab). Character counts are the store's hard limits.
 
 ## Item name
 
-*Limit 75 characters. Currently 35.*
+*Limit 75 characters. Currently 40.*
 
 ```
-Chat2MD — Save AI chats as Markdown
+Chat2MD — Save ChatGPT chats as Markdown
 ```
 
 > Generated from the `chatgpt` entry in `platforms.config.mjs`; `npm run build` writes the
-> same string into `extension/manifest.json` → `name`. Change the config, not either copy.
+> same string into the manifest → `name`. Change the config, not either copy.
 >
-> **Do not put "ChatGPT" in this field.** OpenAI's brand guidelines say not to build their
-> marks into a product or company name. The mark belongs in the *description*, where it
-> describes compatibility, together with the TRADEMARKS paragraph below. This is the same
-> rule the Claude item follows; the two Google items differ only because Google explicitly
-> blesses the "… for Gemini™" construction.
+> **This field used to forbid the word "ChatGPT", on the theory that OpenAI's guidelines bar
+> their marks from a product name.** That was over-cautious and cost search visibility for no
+> demonstrated benefit. The Web Store carries many published items with ChatGPT in the title,
+> including a *Featured* one. Nominative use — naming the site the tool works on — is not what
+> the impersonation policy targets; that policy is about claiming to be, or to be endorsed by,
+> the other party.
+>
+> What still matters: keep the TRADEMARKS paragraph below (it is the disclaimer that makes the
+> nominative use plainly nominative), do not adopt a name that reads first-party, and keep
+> other parties' logos and wordmarks out of the icon and screenshots.
 
 ---
 

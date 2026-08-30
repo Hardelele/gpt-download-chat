@@ -19,11 +19,24 @@
  *   - Google permits "<Your Product> for Gemini™" / "... for AI Mode™" as long
  *     as the ™ is used (never ®) and the listing carries an attribution and a
  *     non-affiliation line. Hence the two Google items keep their marks.
- *   - OpenAI's brand guidelines say not to build their marks into a product
- *     name, and Anthropic grants no equivalent carve-out. So the ChatGPT and
- *     Claude items have MARK-FREE names and state compatibility in the
- *     description instead. Do not "helpfully" put ChatGPT or Claude back into
- *     `name` — that is a documented review-delay cause.
+ *   - OpenAI and Anthropic grant no equivalent written carve-out. This file
+ *     used to conclude from that "keep the marks out of `name` entirely, it is
+ *     a documented review-delay cause". That conclusion was not supported by
+ *     evidence and has been dropped for `chatgpt`: the Web Store is full of
+ *     published items with ChatGPT in the title, and at least one of them
+ *     ("Экспортер ChatGPT — ChatGPT в PDF, MD и другие форматы") is *Featured*
+ *     by Google. Nominative use to say which site a tool works on is not what
+ *     the impersonation policy targets — that policy forbids claiming to BE, or
+ *     to be endorsed by, the other party.
+ *
+ *     So `chatgpt` now carries the mark. The mitigation is the TRADEMARKS
+ *     paragraph in the listing ("independent, unofficial ... not affiliated
+ *     with, endorsed by, or sponsored by OpenAI"), which must stay. The residual
+ *     risk is a complaint from the mark owner later, not a rejection at review.
+ *
+ *     What is still forbidden: a name that reads first-party ("ChatGPT
+ *     Exporter", "OpenAI Markdown"), and any use of another party's logo or
+ *     wordmark in the icon or screenshots.
  *
  * Every `name` here must match the "Item name" block of the matching
  * `store/**\/listing.md`, and every `description` must match its "Short
@@ -60,7 +73,7 @@ export const PLATFORMS = [
     id: 'chatgpt',
     listing: 'store/listing.md',
     outputName: 'chat2md-chatgpt',
-    name: 'Chat2MD — Save AI chats as Markdown',
+    name: 'Chat2MD — Save ChatGPT chats as Markdown',
     description:
       'Export any ChatGPT conversation to a clean Markdown file. Code blocks, tables and LaTeX survive. Runs entirely on your machine.',
     hostPermissions: ['https://chatgpt.com/*', 'https://chat.openai.com/*'],

@@ -26,7 +26,12 @@ everything below needs a person with a browser, a Google account and a credit ca
 
 | item | publisher | store ID | status |
 | --- | --- | --- | --- |
-| `chatgpt` | Perfect Storms | `bngmdbdgobfoagmedlobigmfjikcadcc` | submitted 2026-08-30, **pending review**, auto-publish on pass |
+| `chatgpt` | Perfect Storms | `bngmdbdgobfoagmedlobigmfjikcadcc` | submitted 2026-08-30 as **Chat2MD — Save ChatGPT chats as Markdown**, **pending review**, auto-publish on pass |
+
+A submission is not a one-way door: the item's ⋮ menu carries **Cancel review**, which returns
+it to draft so a new package can be uploaded. The package fields (title, summary) are locked
+while a review is pending precisely because they come from the manifest — cancel, upload,
+resubmit. Everything typed into the listing survives the round trip.
 
 Google warned at submit time that the host permissions may trigger an in-depth review, so
 expect this one to be slower than the "few hours" best case.
@@ -87,8 +92,12 @@ window if `docs/` ever changes shape.
 ### 2. Register a developer account (one-time)
 
 1. Go to <https://chrome.google.com/webstore/devconsole>.
-2. Sign in with the Google account that will *own* the item. Choose carefully — transferring
-   an item to a different account later is a support ticket, not a setting.
+2. Sign in with the Google account that will *own* the item. Pick the right **publisher** in
+   the header switcher before creating anything — the switcher does not persist, it falls back
+   to the default publisher on reload, so re-check it on the Items page before clicking
+   "New item". (Moving an item afterwards is recoverable: the item's ⋮ menu has **Transfer to
+   another publisher**. This checklist previously called that a support ticket; it is a menu
+   item.)
 3. Pay the **one-time US$5 registration fee**. It is per account, not per extension, and it
    is non-refundable. Payment can take a few minutes to clear before the console unlocks.
 4. Complete the **account tab**: publisher display name, a contact email, and a physical

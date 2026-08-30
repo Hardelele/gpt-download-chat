@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Chat2MD — Save AI chats as Markdown",
+  "name": "Chat2MD — Save ChatGPT chats as Markdown",
   "version": "0.1.0",
   "description": "Export any ChatGPT conversation to a clean Markdown file. Code blocks, tables and LaTeX survive. Runs entirely on your machine.",
   "icons": {
