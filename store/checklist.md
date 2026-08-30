@@ -22,6 +22,26 @@ everything below needs a person with a browser, a Google account and a credit ca
 
 ---
 
+## Submission record
+
+| item | publisher | store ID | status |
+| --- | --- | --- | --- |
+| `chatgpt` | Perfect Storms | `bngmdbdgobfoagmedlobigmfjikcadcc` | submitted 2026-08-30, **pending review**, auto-publish on pass |
+
+Google warned at submit time that the host permissions may trigger an in-depth review, so
+expect this one to be slower than the "few hours" best case.
+
+## The publisher limit counts PUBLISHED items, not drafts
+
+The console's own wording: *"You've used 1 of 3 allowed published extensions. While you can
+continue to save drafts after reaching this limit, you will be unable to submit new extensions
+for review."* So all four items can be prepared in the dashboard; only submission is gated.
+
+Both publisher accounts sit at 1/3 (Reckue holds Reckue Languages; Perfect Storms holds Git
+pages). The cap can be raised — the request is made from the dashboard and usually answered
+immediately, but Google declines when the existing published items show weak engagement or the
+account is young. Practically: ship, get installs, then ask.
+
 ## Only ONE item is submittable today
 
 `chatgpt` is complete. **Claude, Gemini and AI Mode have no screenshots** — the store requires
@@ -101,11 +121,17 @@ Copy from `store/listing.md`:
 - [ ] **Short description** — pulled from the manifest; do not edit it here, edit the manifest.
 - [ ] **Detailed description** — paste the block from `store/listing.md`. Plain text only;
       the field does not render Markdown or HTML.
-- [ ] **Category** — Productivity.
+- [ ] **Category** — the field is a *grouped* list. "Productivity" is a group heading, not a
+      selectable value; pick **Workflow & Planning** underneath it.
 - [ ] **Language** — English (United States).
-- [ ] **Store icon** — upload `store/assets/icon512.png` (the console accepts 128×128 but
-      takes the larger file and downscales it more cleanly).
-- [ ] **Screenshots** — upload all three from `store/assets/`. At least one is mandatory,
+- [ ] **Store icon** — upload the **128×128** icon from the built package, e.g.
+      `dist/chat2md-<id>-<version>/icons/icon128.png`. It must be *exactly* 128×128.
+      **`store/assets/icon512.png` is rejected** with *"The image size is incorrect"* — the
+      console does not downscale a larger file, contrary to what this checklist used to claim.
+      Using the package's own icon also means the store tile matches the toolbar icon the user
+      sees after installing.
+- [ ] **Screenshots** — upload all three from `store/assets/`, **one file per drop**; the
+      input is not `multiple` and rejects a multi-file selection. At least one is mandatory,
       five is the maximum. Requirements: **1280×800 or 640×400**, PNG or JPEG, no alpha
       channel, no rounded corners or drop shadows added by you around the outside of the
       image. Ours are 1280×800 PNG.
@@ -135,6 +161,8 @@ Fields:
 - [ ] **Justification for `storage`**.
 - [ ] **Justification for host permissions** (`chatgpt.com`, `chat.openai.com`).
 - [ ] **Remote code** → *No, I am not using remote code.*
+      **The form defaults to "Yes, I am using Remote code".** Leaving it is an explicit
+      declaration of the one thing MV3 forbids, on an extension that does not do it. Change it.
 - [ ] **Data usage** → leave every category **unchecked**. Nothing is collected.
 - [ ] Tick all **three certification checkboxes**.
 - [ ] **Privacy policy URL** → `https://hardelele.github.io/gpt-download-chat/privacy.html`
