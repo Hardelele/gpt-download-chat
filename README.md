@@ -61,6 +61,21 @@ The build step exists only to *compose* — it copies files and generates a mani
 set and a `platform.js`. It ships plain ES modules with no bundler, no transpiler and no
 dependencies, so what you load is still what you read.
 
+> **Two ways a dev-mode install disappears. Both are the build's doing, not Chrome's.**
+>
+> 1. **Do not load `extension/` (or any `extensions/<id>/`).** They are source trees, not
+>    extensions: the popup, the service worker, `content.js`, `platform.js` and
+>    `lib/{markdown,filename}.js` live in `shared/` and are only brought together at build
+>    time. `extension/manifest.json` still names `src/popup/popup.html` and
+>    `src/background.js`, so Chrome loads it and then fails to register the worker or open the
+>    popup. `npm run verify` reports exactly this — if it names two missing shell files, it is
+>    telling you the truth about `extension/`, not lagging behind a refactor.
+> 2. **Every build deletes and recreates `dist/<name>-<version>/`** before repopulating it.
+>    Chrome tracks an unpacked extension by that path, so a rebuild while it is loaded needs a
+>    click on **Reload** afterwards — and can drop the entry entirely, which looks exactly like
+>    the extension having been disabled or uninstalled. If it vanishes after a build, load it
+>    again; nothing is wrong with the package.
+
 ## Build
 
 Node 20+ (CI runs 22). No dependencies to install — `npm install` is not required.
