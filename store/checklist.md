@@ -15,30 +15,42 @@ everything below needs a person with a browser, a Google account and a credit ca
 - [x] Listing copy — `store/listing.md`.
 - [x] Permission justifications, single purpose, data-usage answers — `store/permissions-justification.md`.
 - [x] Privacy policy written (`PRIVACY.md`) and a hosted copy staged at `docs/privacy.html`.
-- [x] Packaged archive — `npm run build` → `dist/chat2md-0.1.0.zip`, manifest at the root,
-      archive read back and validated.
+- [x] Packaged archives — `npm run build` → four zips under `dist/`, manifest at the root of
+      each, every archive read back and validated. See the table at the bottom for names.
+- [x] **GitHub Pages is live and the privacy policy resolves** — verified 200:
+      `https://hardelele.github.io/gpt-download-chat/privacy.html`
+
+---
+
+## Only ONE item is submittable today
+
+`chatgpt` is complete. **Claude, Gemini and AI Mode have no screenshots** — the store requires
+at least one, so those three cannot be submitted until someone captures them. Their listing
+files spell out what each shot must show. `npm run screenshots` only renders the ChatGPT set;
+it is not parameterised per platform.
+
+## The dashboard cannot be automated
+
+Chrome forbids extensions from scripting `chrome.google.com` (the extensions gallery), and the
+developer console is served from that origin. Browser automation gets
+*"The extensions gallery cannot be scripted"* and stops there. Every step below is a human at
+a keyboard — that is a Chrome restriction, not a missing credential.
 
 ---
 
 ## HUMAN ONLY — from here down, someone has to do this by hand
 
-### 1. Turn on GitHub Pages (needed before you can submit — the store requires a *reachable* policy URL)
+### 1. GitHub Pages — DONE, nothing to do
 
-1. Push `main` to `github.com/hardelele/gpt-download-chat`.
-2. Repo → **Settings** → **Pages**.
-3. **Source:** *Deploy from a branch*. **Branch:** `main`, **Folder:** `/docs`. Save.
-4. Wait for the green tick (first publish takes 1–3 minutes), then open:
+Source is `main` / `/docs`, build status `built`, and both URLs return 200:
 
-   ```
-   https://hardelele.github.io/gpt-download-chat/privacy.html
-   ```
+```
+https://hardelele.github.io/gpt-download-chat/privacy.html   ← privacy policy field
+https://hardelele.github.io/gpt-download-chat/               ← landing page
+```
 
-   **Confirm in a private window that it loads.** A 404 here is the single most common
-   avoidable rejection — the reviewer opens the URL you typed, and if it does not resolve
-   the item is rejected without any further review.
-
-   The landing page at `https://hardelele.github.io/gpt-download-chat/` also works and is a
-   fine value for the Homepage field, though the GitHub repo URL is more useful.
+A policy URL that 404s is the most common avoidable rejection, so re-check it in a private
+window if `docs/` ever changes shape.
 
 > `docs/.nojekyll` is committed so GitHub Pages serves the files as-is rather than running
 > them through Jekyll. Do not delete it.
@@ -55,10 +67,17 @@ everything below needs a person with a browser, a Google account and a credit ca
 5. **Verify the contact email.** Unverified contact email blocks publishing, and the console
    does not always say so loudly.
 
+> **Two different addresses, on purpose — do not "fix" one to match the other.**
+> The console signs in as `hardelele@gmail.com` (the Google account that owns the item).
+> `store/listing.md` gives the published developer contact as `hardelele@yahoo.com`. The
+> contact address is the one that must be verified in the account tab; the sign-in address is
+> not automatically the contact address. Decide which one users should write to, set that in
+> the account tab, verify it, and make `store/listing.md` agree.
+
 ### 3. Create the item and upload
 
 1. Console → **Items** → **Add new item**.
-2. Upload `dist/chat2md-0.1.0.zip`.
+2. Upload `dist/chat2md-chatgpt-0.1.0.zip`.
    - If you get *"Manifest file is missing or unreadable"*, the archive has the manifest one
      folder down. `npm run build` prevents this and fails loudly if it ever happens, so
      rebuild rather than repacking by hand — and specifically **do not** zip the `extension`
@@ -89,7 +108,16 @@ Copy from `store/listing.md`:
 
 ### 5. Fill in the Privacy tab
 
-Copy from `store/permissions-justification.md`:
+Copy from `store/permissions-justification.md`.
+
+> That file is written for the **ChatGPT** item only — its host-permission paragraph names
+> `chatgpt.com` and `chat.openai.com`. The other three items carry their own
+> `## Permissions justification` section inside `store/<id>/listing.md`, naming their own
+> hosts (`claude.ai`, `gemini.google.com` + `aistudio.google.com`,
+> `www.google.com/search*` + `/ai*`). Pasting the ChatGPT text into a sibling item justifies
+> hosts that item does not request, which is a rejection in its own right.
+
+Fields:
 
 - [ ] **Single purpose description** — the paragraph in that file.
 - [ ] **Justification for `downloads`**.
