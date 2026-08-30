@@ -8,6 +8,7 @@ import {
   convertMathDelimiters,
   incompleteWarning,
   INCOMPLETE_PREFIX,
+  sanitizeProse,
 } from '../shared/lib/markdown.js';
 import { buildFilename, slugify } from '../shared/lib/filename.js';
 
@@ -814,4 +815,133 @@ test('the partial marker survives a title that hits the length cap', () => {
   });
   assert.equal(out.endsWith('-partial.md'), true);
   assert.doesNotMatch(out, /[\\/:*?"<>|]/);
+});
+
+/* ------------------------------------------------------------------ *
+ * prose sanitisation
+ *
+ * Every invisible character below is written as an escape on purpose: a literal
+ * would be unreviewable in a diff.
+ * ------------------------------------------------------------------ */
+
+const NBSP = '\u00A0';
+const NNBSP = '\u202F';
+const FIGSP = '\u2007';
+const ZWSP = '\u200B';
+const BOM = '\uFEFF';
+const ZWJ = '\u200D';
+const PUA = '\uE000';
+const IDEO_SPACE = '\u3000';
+// The wire form of a citation marker: private-use delimiters around an ASCII
+// payload. Stripping only the delimiters is what leaves `citeturn0search1`
+// welded into users' notes.
+const MARKER = '\uE200cite\uE202turn0search1\uE201';
+
+test('NBSP and other look-alike spaces become plain spaces in prose', () => {
+  assert.equal(sanitizeProse(`a${NBSP}b`), 'a b');
+  assert.equal(sanitizeProse(`10${NNBSP}km`), '10 km');
+  assert.equal(sanitizeProse(`x${FIGSP}y`), 'x y');
+});
+
+test('NBSP inside a fenced block survives byte-exact', () => {
+  const input = [`before${NBSP}after`, '', '```python', `x =${NBSP}1`, '```'].join('\n');
+  const out = sanitizeProse(input);
+  assert.equal(out.includes(`x =${NBSP}1`), true, 'fenced NBSP must survive');
+  assert.equal(out.includes('before after'), true, 'prose NBSP must be normalised');
+});
+
+test('NBSP inside an inline code span survives', () => {
+  const out = sanitizeProse(`use \`a${NBSP}b\` here${NBSP}now`);
+  assert.equal(out.includes(`\`a${NBSP}b\``), true);
+  assert.equal(out.includes('here now'), true);
+});
+
+test('ideographic space is left alone — it is real CJK punctuation', () => {
+  const input = `第一${IDEO_SPACE}第二`;
+  assert.equal(sanitizeProse(input), input);
+});
+
+test('zero-width space and BOM are removed, but joiners are not', () => {
+  assert.equal(sanitizeProse(`a${ZWSP}b`), 'ab');
+  assert.equal(sanitizeProse(`${BOM}start`), 'start');
+  // ZWJ holds multi-part emoji together and is load-bearing in Persian/Indic text
+  const family = `\u{1F468}${ZWJ}\u{1F469}${ZWJ}\u{1F467}`;
+  assert.equal(sanitizeProse(`family ${family} here`), `family ${family} here`);
+});
+
+test('citation residue is removed from prose', () => {
+  assert.equal(
+    sanitizeProse('The answer is 42 citeturn5search9turn5search1 as shown.'),
+    'The answer is 42  as shown.',
+  );
+  assert.equal(sanitizeProse('see citeturn0news12'), 'see ');
+});
+
+test('a private-use-delimited citation marker is removed whole, payload included', () => {
+  assert.equal(sanitizeProse(`Answer.${MARKER} Next sentence.`), 'Answer. Next sentence.');
+});
+
+test('citation residue inside code is left alone', () => {
+  const fenced = '```js\nconst s = "citeturn0search1";\n```';
+  assert.equal(sanitizeProse(fenced), fenced);
+  const inline = 'the literal `citeturn0search1` marker';
+  assert.equal(sanitizeProse(inline), inline);
+});
+
+test('text that merely resembles a citation marker is NOT eaten', () => {
+  // A false positive is far worse than a leftover marker, so the pattern needs
+  // the full turn<digits><word><digits> shape.
+  const safe = [
+    'I will cite turn 5 of the search results.',
+    'citeturn',
+    'citeturn5',
+    'citeturnsearch',
+    'Please cite sources.',
+    'navlist of items',
+    'the video turned out well',
+    'excite turns heads',
+  ];
+  for (const s of safe) assert.equal(sanitizeProse(s), s, `must not touch: ${s}`);
+});
+
+test('real links and markdown survive sanitisation', () => {
+  const input = 'See [the docs](https://example.com/a_b?c=1&d=2) and **bold** text.';
+  assert.equal(sanitizeProse(input), input);
+});
+
+test('private-use characters are stripped from prose but not from code', () => {
+  assert.equal(sanitizeProse(`icon${PUA}here`), 'iconhere');
+  const fenced = `\`\`\`\nnerd font: ${PUA}\n\`\`\``;
+  assert.equal(sanitizeProse(fenced), fenced);
+});
+
+test('sanitizeProse tolerates junk input', () => {
+  assert.equal(sanitizeProse(null), '');
+  assert.equal(sanitizeProse(undefined), '');
+  assert.equal(sanitizeProse(42), '');
+  assert.equal(sanitizeProse(''), '');
+});
+
+test('clean text is returned identically (fast path)', () => {
+  const input = 'Nothing to do here.\n\n```js\nconst a = 1;\n```\n';
+  assert.equal(sanitizeProse(input), input);
+});
+
+test('toMarkdown sanitises message bodies end to end', () => {
+  const text = `Paris${NBSP}is the capital${MARKER}.\n\n\`\`\`sh\necho "a${NBSP}b"\n\`\`\``;
+  const out = toMarkdown(conv({ messages: [msg({ role: 'assistant', text })] }), {
+    now: NOW,
+    frontmatter: false,
+  });
+  assert.equal(out.includes('Paris is the capital.'), true);
+  assert.equal(out.includes('citeturn'), false);
+  assert.equal(out.includes(`echo "a${NBSP}b"`), true, 'code fence must stay byte-exact');
+});
+
+test('sanitisation runs before the math scan', () => {
+  const out = toMarkdown(
+    conv({ messages: [msg({ role: 'assistant', text: `so \\(${NBSP}x^2 \\) holds` })] }),
+    { now: NOW, frontmatter: false },
+  );
+  assert.equal(out.includes('so $x^2$ holds'), true);
 });

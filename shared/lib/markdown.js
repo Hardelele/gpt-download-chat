@@ -247,7 +247,11 @@ function renderMessage(m, o) {
     if (ts) parts.push(`*${ts}*`);
   }
 
-  const body = tidyBody(o.mathDelimiters === 'dollar' ? convertMathDelimiters(m.text) : m.text);
+  // Order matters: strip the private-use delimiters and the citation residue
+  // first, so a marker sitting next to a formula cannot confuse the math scan.
+  let raw = sanitizeProse(m.text);
+  if (o.mathDelimiters === 'dollar') raw = convertMathDelimiters(raw);
+  const body = tidyBody(raw);
   if (body) parts.push(body);
 
   const attachments = renderAttachments(m.attachments);
@@ -314,6 +318,72 @@ function linkTarget(url) {
 }
 
 /* ------------------------------------------------------------------ *
+ * prose sanitisation
+ * ------------------------------------------------------------------ */
+
+/**
+ * Internal plumbing that leaks out of the chat UI and into exports.
+ *
+ * `citeturn0search1` is the residue of a citation marker. In the wire format
+ * the marker is delimited by private-use characters
+ * (`U+E200 cite U+E202 turn0search1 U+E201`); strip only the private-use
+ * characters — which is as far as every exporter in this category gets — and
+ * the ASCII payload is left welded into the prose. That is the exact text users
+ * report finding in their notes. We remove the private-use characters first and
+ * then the payload.
+ *
+ * The pattern is deliberately narrow: a `cite`/`navlist`/`video` lead-in plus at
+ * least one full `turn<digits><word><digits>` group. Prose does not contain that
+ * by accident, and eating real text would be far worse than leaving a marker in.
+ */
+const CITATION_RESIDUE = /(?:cite|navlist|video)(?:turn\d+[a-z]+\d+)+/gi;
+
+/** Private-use area: never legitimate prose. Icon fonts live in code, which is protected. */
+const PRIVATE_USE = /[\uE000-\uF8FF]/g;
+
+/**
+ * Whitespace that looks like a space but is not one. Normalised because it
+ * breaks search, diff and word wrap in a notes app.
+ * U+3000 (ideographic space) is deliberately NOT here: it is real punctuation
+ * in CJK text.
+ */
+const FAKE_SPACES = /[\u00A0\u2007\u202F]/g;
+
+/** Invisible characters that carry no meaning in prose. */
+const INVISIBLES = /[\u200B\uFEFF]/g;
+
+// Detector for the fast path — same character classes, no `g` flag.
+const NEEDS_SANITISING = /[\uE000-\uF8FF\u00A0\u2007\u202F\u200B\uFEFF]|(?:cite|navlist|video)turn\d/i;
+
+/**
+ * Removes UI plumbing and normalises look-alike whitespace, in prose only.
+ * Fenced blocks and inline code are byte-exact: a non-breaking space inside a
+ * code sample may well be deliberate, and private-use characters inside a fence
+ * are probably Nerd Font icons.
+ *
+ * Note what is deliberately NOT touched: curly quotes, en/em dashes and other
+ * real typography (they are correct, not corruption), and zero-width joiners
+ * (U+200D/U+200C), which hold multi-part emoji together and are load-bearing in
+ * Persian and Indic scripts.
+ *
+ * @param {unknown} text
+ * @returns {string}
+ */
+export function sanitizeProse(text) {
+  if (typeof text !== 'string' || text === '') return '';
+  if (!NEEDS_SANITISING.test(text)) return text; // fast path
+  return mapProse(text, sanitizeRun);
+}
+
+function sanitizeRun(run) {
+  return run
+    .replace(PRIVATE_USE, '')
+    .replace(CITATION_RESIDUE, '')
+    .replace(FAKE_SPACES, ' ')
+    .replace(INVISIBLES, '');
+}
+
+/* ------------------------------------------------------------------ *
  * LaTeX delimiter normalisation
  * ------------------------------------------------------------------ */
 
@@ -341,8 +411,19 @@ function linkTarget(url) {
 export function convertMathDelimiters(text) {
   if (typeof text !== 'string' || text === '') return '';
   if (!text.includes('\\(') && !text.includes('\\[')) return text; // fast path
+  return mapProse(text, convertSpans);
+}
+
+/**
+ * Applies `transform` to every run of ordinary prose, leaving fenced code blocks
+ * and inline-code spans byte-for-byte identical.
+ * @param {string} text
+ * @param {(run: string) => string} transform
+ * @returns {string}
+ */
+function mapProse(text, transform) {
   return splitOutFences(text)
-    .map((seg) => (seg.code ? seg.text : convertOutsideInlineCode(seg.text)))
+    .map((seg) => (seg.code ? seg.text : convertOutsideInlineCode(seg.text, transform)))
     .join('');
 }
 
@@ -390,8 +471,8 @@ function splitOutFences(text) {
   return segments.map((seg, i) => (i === 0 ? seg : { ...seg, text: `\n${seg.text}` }));
 }
 
-/** Convert the plain runs of a non-code segment, skipping `` `inline code` ``. */
-function convertOutsideInlineCode(segment) {
+/** Transform the plain runs of a non-code segment, skipping `` `inline code` ``. */
+function convertOutsideInlineCode(segment, transform) {
   let out = '';
   let plainStart = 0;
   let i = 0;
@@ -408,13 +489,13 @@ function convertOutsideInlineCode(segment) {
       i += run; // unmatched backticks are ordinary text
       continue;
     }
-    out += convertSpans(segment.slice(plainStart, i));
+    out += transform(segment.slice(plainStart, i));
     out += segment.slice(i, closer + run); // the code span, verbatim
     i = closer + run;
     plainStart = i;
   }
 
-  return out + convertSpans(segment.slice(plainStart));
+  return out + transform(segment.slice(plainStart));
 }
 
 /** Index of the next backtick run of exactly `length`, or -1. */
