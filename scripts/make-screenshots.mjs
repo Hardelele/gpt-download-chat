@@ -104,6 +104,8 @@ popupCss = (() => {
 // Take the real <body> contents, drop the script tag (no extension APIs here).
 let body = popupHtml.slice(popupHtml.indexOf('<body>') + 6, popupHtml.lastIndexOf('</body>'));
 body = body.replace(/<script[\s\S]*?<\/script>/g, '');
+// The header mark points at ../../icons/ inside the package; here the icon sits beside the page.
+body = body.replace(/(src|srcset)="[^"]*icons\/icon\d+\.png[^"]*"/g, '$1="icon128.png"');
 
 // Drive it into the state a user actually sees: ready, with the sample loaded.
 body = body

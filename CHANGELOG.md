@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Nothing yet._
 
+## [0.1.2] — 2026-11-10
+
+### Changed
+
+- **New icon.** A chat bubble in the platform colour with a bold Markdown `#` cut into it,
+  replacing the generic download arrow — it now says "a chat, as Markdown" and no longer
+  looks like every other downloader in the toolbar. The popup header uses the same icon
+  instead of its own green "MD" tile, and the store screenshots are re-rendered with it.
+
 ## [0.1.1] — 2026-11-10
 
 ### Fixed
@@ -65,6 +74,7 @@ First release. Exports a full ChatGPT conversation to a Markdown file.
   `<all_urls>`, no wildcard host patterns.
 - No data collection, no analytics, no telemetry, no network egress to any third party.
 
-[Unreleased]: https://github.com/hardelele/gpt-download-chat/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/hardelele/gpt-download-chat/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/hardelele/gpt-download-chat/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/hardelele/gpt-download-chat/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/hardelele/gpt-download-chat/releases/tag/v0.1.0

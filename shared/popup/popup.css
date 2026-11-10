@@ -80,16 +80,11 @@ body {
 }
 
 .mark {
-  display: grid;
-  place-items: center;
+  /* The toolbar icon itself, so the popup and the toolbar carry one mark. */
+  display: block;
   width: 22px;
   height: 22px;
-  border-radius: 6px;
-  background: var(--accent);
-  color: var(--accent-fg);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
+  flex: none;
 }
 
 .head h1 {

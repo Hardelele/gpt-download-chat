@@ -10,8 +10,10 @@
  *   \x89PNG\r\n\x1a\n | IHDR | IDAT (zlib deflate of filter-0 scanlines) | IEND
  * Each chunk is: length(4) type(4) data(n) crc32(4)  — CRC over type+data.
  *
- * Design: full-bleed rounded square in deep ink, a white download arrow over an
- * amber baseline. Thick strokes, two colours, no fine detail, so it survives 16px.
+ * Design: full-bleed rounded square in deep ink holding a chat bubble in the
+ * platform accent, with a bold ink `#` cut into it — "a chat, as Markdown".
+ * The `#` is the one Markdown glyph everyone recognises; the bubble says chat.
+ * Thick strokes, three colours, no fine detail, so it survives 16px.
  */
 
 import { deflateSync } from 'node:zlib';
@@ -87,7 +89,6 @@ function encodePng(rgba, width, height) {
 
 const INK_TOP = [0x1c, 0x26, 0x33];
 const INK_BOTTOM = [0x0d, 0x12, 0x18];
-const PAPER = [0xf8, 0xfa, 0xfc];
 
 /**
  * CLI:
@@ -95,9 +96,9 @@ const PAPER = [0xf8, 0xfa, 0xfc];
  *   node scripts/make-icons.mjs --dir extensions/claude          a sibling extension's set
  *   node scripts/make-icons.mjs --dir extensions/claude --accent "#d97757"
  *
- * The badge and the arrow are identical across platforms on purpose — one family, one
- * recognisable mark. Only the baseline bar is tinted, which is enough to tell the four
- * store items apart in a toolbar without inventing four unrelated logos.
+ * The badge, bubble and `#` are identical across platforms on purpose — one family,
+ * one recognisable mark. Only the bubble is tinted, which tells the four store items
+ * apart in a toolbar without inventing four unrelated logos.
  */
 const arg = (name, fallback) => {
   const i = process.argv.indexOf(name);
@@ -111,16 +112,17 @@ const hexToRgb = (hex) => {
   const n = parseInt(m[1], 16);
   return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
 };
-const AMBER = hexToRgb(arg('--accent', '#f7b733'));
+const ACCENT = hexToRgb(arg('--accent', '#f7b733'));
 
 const BADGE_RADIUS = 0.215;
 
-// Arrow stem
-const STEM_X0 = 0.415, STEM_X1 = 0.585, STEM_Y0 = 0.150, STEM_Y1 = 0.520;
-// Arrow head: apex down
-const HEAD_APEX_Y = 0.715, HEAD_Y = 0.455, HEAD_X0 = 0.265, HEAD_X1 = 0.735;
-// Baseline bar
-const BAR_X0 = 0.250, BAR_X1 = 0.750, BAR_Y0 = 0.775, BAR_Y1 = 0.900;
+// Chat bubble body and its tail (bottom-left, pointing down-left).
+const BUB_X0 = 0.135, BUB_X1 = 0.865, BUB_Y0 = 0.165, BUB_Y1 = 0.735, BUB_R = 0.15;
+const TAIL = [[0.250, 0.700], [0.470, 0.700], [0.200, 0.885]];
+// The `#`: two slanted verticals, two horizontals, centred in the bubble.
+const HASH_CX = 0.500, HASH_CY = 0.450, HASH_HALF = 0.185, HASH_W = 0.085, HASH_SLANT = 0.22;
+const HASH_V = [-0.085, 0.085];   // vertical bar centres, relative to HASH_CX
+const HASH_H = [-0.075, 0.075];   // horizontal bar centres, relative to HASH_CY
 
 function inRoundedRect(x, y, x0, y0, x1, y1, r) {
   if (x < x0 || x > x1 || y < y0 || y > y1) return false;
@@ -130,17 +132,28 @@ function inRoundedRect(x, y, x0, y0, x1, y1, r) {
   return dx * dx + dy * dy <= r * r;
 }
 
-function inArrow(x, y) {
-  if (inRoundedRect(x, y, STEM_X0, STEM_Y0, STEM_X1, STEM_Y1, 0.05)) return true;
-  // Triangle (HEAD_X0,HEAD_Y) (HEAD_X1,HEAD_Y) (0.5,HEAD_APEX_Y)
-  if (y < HEAD_Y || y > HEAD_APEX_Y) return false;
-  const t = (y - HEAD_Y) / (HEAD_APEX_Y - HEAD_Y); // 0 at base, 1 at apex
-  const halfW = ((HEAD_X1 - HEAD_X0) / 2) * (1 - t);
-  return Math.abs(x - 0.5) <= halfW;
+function inTriangle(x, y, [a, b, c]) {
+  const d = (p, q) => (x - q[0]) * (p[1] - q[1]) - (p[0] - q[0]) * (y - q[1]);
+  const d1 = d(a, b), d2 = d(b, c), d3 = d(c, a);
+  return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
 }
 
-function inBar(x, y) {
-  return inRoundedRect(x, y, BAR_X0, BAR_Y0, BAR_X1, BAR_Y1, (BAR_Y1 - BAR_Y0) / 2);
+function inBubble(x, y) {
+  return inRoundedRect(x, y, BUB_X0, BUB_Y0, BUB_X1, BUB_Y1, BUB_R) || inTriangle(x, y, TAIL);
+}
+
+function inHash(x, y) {
+  const dy = y - HASH_CY;
+  if (Math.abs(dy) <= HASH_HALF) {
+    // Verticals lean forward like an italic `#`.
+    const sx = x - HASH_CX + dy * HASH_SLANT;
+    for (const v of HASH_V) if (Math.abs(sx - v) <= HASH_W / 2) return true;
+  }
+  const dx = x - HASH_CX;
+  if (Math.abs(dx + dy * HASH_SLANT) <= HASH_HALF) {
+    for (const h of HASH_H) if (Math.abs(dy - h) <= HASH_W / 2) return true;
+  }
+  return false;
 }
 
 function lerp(a, b, t) {
@@ -161,7 +174,7 @@ function render(size, ss = 4) {
 
   for (let py = 0; py < size; py++) {
     for (let px = 0; px < size; px++) {
-      let covBadge = 0, covArrow = 0, covBar = 0;
+      let covBadge = 0, covBubble = 0, covHash = 0;
       let bgR = 0, bgG = 0, bgB = 0;
 
       for (let sy = 0; sy < ss; sy++) {
@@ -172,8 +185,10 @@ function render(size, ss = 4) {
           covBadge++;
           const c = lerp(INK_TOP, INK_BOTTOM, y);
           bgR += c[0]; bgG += c[1]; bgB += c[2];
-          if (inArrow(x, y)) covArrow++;
-          else if (inBar(x, y)) covBar++;
+          if (inBubble(x, y)) {
+            if (inHash(x, y)) covHash++;
+            else covBubble++;
+          }
         }
       }
 
@@ -186,14 +201,11 @@ function render(size, ss = 4) {
       // Base colour = average ink under the covered subsamples.
       let r = bgR / covBadge, g = bgG / covBadge, b = bgB / covBadge;
 
-      const aArrow = covArrow / covBadge;
-      const aBar = covBar / covBadge;
-      r = r * (1 - aArrow) + PAPER[0] * aArrow;
-      g = g * (1 - aArrow) + PAPER[1] * aArrow;
-      b = b * (1 - aArrow) + PAPER[2] * aArrow;
-      r = r * (1 - aBar) + AMBER[0] * aBar;
-      g = g * (1 - aBar) + AMBER[1] * aBar;
-      b = b * (1 - aBar) + AMBER[2] * aBar;
+      // The `#` is the badge ink showing through the bubble, so only the bubble paints.
+      const aBubble = covBubble / covBadge;
+      r = r * (1 - aBubble) + ACCENT[0] * aBubble;
+      g = g * (1 - aBubble) + ACCENT[1] * aBubble;
+      b = b * (1 - aBubble) + ACCENT[2] * aBubble;
 
       out[i] = Math.round(r);
       out[i + 1] = Math.round(g);

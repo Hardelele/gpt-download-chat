@@ -1,6 +1,6 @@
 {
   "name": "gpt-download-chat",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "description": "Chat2MD — Chrome MV3 extensions that save a full AI chat as a Markdown file. One shared shell, four store items (see platforms.config.mjs).",
