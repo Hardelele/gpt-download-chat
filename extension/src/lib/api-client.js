@@ -595,6 +595,68 @@ export async function fetchConversation(conversationId, token, opts = {}) {
 }
 
 /**
+ * `/share/<id>` pages load the snapshot from `/backend-api/share/<id>` — the
+ * same mapping/current_node shape as a conversation. Verified live 2026-11:
+ * the page no longer inlines it, and `/backend-api/conversation/<id>` answers
+ * 404 `conversation_inaccessible` to anyone but the owner.
+ *
+ * The request goes out WITHOUT cookies first. With cookies alone the backend
+ * binds it to the viewer's workspace and answers 401 ("could not access the
+ * selected workspace") — that is exactly how a chat someone else shared failed
+ * to download. Anonymous access is what a share link is for. A bearer retry
+ * covers links restricted to signed-in users.
+ *
+ * @param {string} shareId
+ * @param {{fetch?:Function, location?:{origin:string}}} [opts]
+ * @returns {Promise<object>} raw conversation payload
+ */
+export async function fetchSharedConversation(shareId, opts = {}) {
+  const fetchImpl = fetchImplOf(opts);
+  const origin = currentLocation(opts).origin || 'https://chatgpt.com';
+  const url = `${origin}/backend-api/share/${encodeURIComponent(shareId)}`;
+
+  const attempt = async (init) => {
+    const res = await fetchImpl(url, init);
+    if (!res || !res.ok) {
+      const err = new Error(`backend-api/share returned ${res ? res.status : 0}`);
+      err.status = res ? res.status : 0;
+      throw err;
+    }
+    const payload = await res.json();
+    if (!looksLikeConversation(payload)) throw new Error('backend-api/share returned no conversation');
+    return payload;
+  };
+
+  try {
+    return await attempt({ credentials: 'omit', headers: { accept: 'application/json' } });
+  } catch (anonErr) {
+    let token = null;
+    try { token = await getAccessToken(opts); } catch { token = null; }
+    if (!token) throw anonErr;
+    return attempt({ credentials: 'include', headers: authHeaders(token) });
+  }
+}
+
+/**
+ * Share-link API path. Resolves to a Conversation, or throws so extract.js can
+ * try the embedded JSON and then the DOM.
+ * @param {{conversationId?:string, fetch?:Function, location?:object}} [opts]
+ * @returns {Promise<Conversation>}
+ */
+export async function extractShareViaApi(opts = {}) {
+  const loc = currentLocation(opts);
+  const sourceUrl = loc.href || '';
+  const shareId = opts.conversationId || parseConversationId(sourceUrl);
+  if (!shareId) throw new Error('No share id in URL');
+  const payload = await fetchSharedConversation(shareId, opts);
+  return mapConversationPayload(payload, {
+    sourceUrl,
+    conversationId: payload.conversation_id || shareId,
+    extractedVia: 'api',
+  });
+}
+
+/**
  * Full API path. Resolves to a Conversation, or throws so extract.js can fall
  * back to the DOM.
  * @param {{conversationId?:string, fetch?:Function, location?:object}} [opts]

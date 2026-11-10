@@ -408,7 +408,47 @@ test('extractConversation falls back to the DOM when the API 401s', async () => 
   assert.ok(conv.warnings.some((w) => /401/.test(w)));
 });
 
-test('extractConversation goes straight to the DOM for a /share/ link', async () => {
+test('a /share/ link reads /backend-api/share/<id> anonymously, never the owner-only endpoint', async () => {
+  const fetchImpl = fakeFetch([
+    ['/backend-api/share/', (url, init) => (init && init.credentials === 'omit'
+      ? json({ ...PAYLOAD, conversation_id: 'conv-of-someone-else' })
+      // With cookies the backend binds the call to the viewer's workspace.
+      : json({ detail: { message: 'workspace' } }, 401))],
+  ]);
+  const conv = await extractConversation({
+    fetch: fetchImpl,
+    location: { origin: 'https://chatgpt.com', href: 'https://chatgpt.com/share/abc-1234-5678-90ab' },
+    document: makeDocument(TRANSCRIPT_HTML),
+    waitMs: 0,
+    maxIterations: 2,
+  });
+  assert.equal(conv.extractedVia, 'api');
+  assert.equal(conv.messages.length, 8);
+  assert.equal(conv.sourceUrl, 'https://chatgpt.com/share/abc-1234-5678-90ab');
+  assert.ok(!fetchImpl.calls.some((c) => c.url.includes('/backend-api/conversation/')));
+  assert.equal(fetchImpl.calls.find((c) => c.url.includes('/backend-api/share/')).init.credentials, 'omit');
+  assert.ok(conv.warnings.some((w) => /share snapshot API/.test(w)));
+});
+
+test('a /share/ link retries with the bearer token when the anonymous call is refused', async () => {
+  const fetchImpl = fakeFetch([
+    ['/api/auth/session', () => json({ accessToken: 'tok' })],
+    ['/backend-api/share/', (url, init) => (init.headers && init.headers.authorization === 'Bearer tok'
+      ? json(PAYLOAD)
+      : json({ detail: 'login required' }, 401))],
+  ]);
+  const conv = await extractConversation({
+    fetch: fetchImpl,
+    location: { origin: 'https://chatgpt.com', href: 'https://chatgpt.com/share/abc-1234-5678-90ab' },
+    document: makeDocument(TRANSCRIPT_HTML),
+    waitMs: 0,
+    maxIterations: 2,
+  });
+  assert.equal(conv.extractedVia, 'api');
+  assert.equal(conv.messages.length, 8);
+});
+
+test('a /share/ link falls back to the DOM when the share API is unreachable', async () => {
   const fetchImpl = fakeFetch([['/backend-api/conversation/', () => json(PAYLOAD)]]);
   const conv = await extractConversation({
     fetch: fetchImpl,
@@ -419,7 +459,7 @@ test('extractConversation goes straight to the DOM for a /share/ link', async ()
   });
   assert.equal(conv.extractedVia, 'dom');
   assert.ok(!fetchImpl.calls.some((c) => c.url.includes('/backend-api/conversation/')));
-  assert.ok(conv.warnings.some((w) => /Shared conversation link/.test(w)));
+  assert.ok(conv.warnings.some((w) => /share API failed/.test(w)));
 });
 
 test('findEmbeddedPayload digs the conversation JSON out of a __NEXT_DATA__ script', () => {

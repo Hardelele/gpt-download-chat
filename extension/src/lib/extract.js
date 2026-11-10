@@ -10,6 +10,7 @@ import {
   parseConversationId,
   isShareUrl,
   extractViaApi,
+  extractShareViaApi,
   findEmbeddedPayload,
   mapConversationPayload,
   buildBranch,
@@ -138,17 +139,28 @@ export async function extractConversation(opts = {}) {
   let apiResult = null;
   if (!opts.preferDom) {
     if (isShareUrl(sourceUrl)) {
-      // Share pages have no reachable endpoint, but they ship the same JSON inline.
-      const embedded = safeEmbeddedPayload(opts);
+      // Share pages load their snapshot from /backend-api/share/<id>. Older
+      // builds inlined the same JSON instead — kept as the second try.
+      let shareErr = null;
+      try {
+        apiResult = normalizeConversation(
+          await extractShareViaApi({ ...opts, conversationId, location: loc }),
+          { id: conversationId, sourceUrl },
+        );
+        warnings.push('Shared conversation link — read from the share snapshot API.');
+      } catch (err) {
+        shareErr = err;
+      }
+      const embedded = apiResult ? null : safeEmbeddedPayload(opts);
       if (embedded) {
         apiResult = normalizeConversation(
           mapConversationPayload(embedded, { sourceUrl, conversationId, extractedVia: 'api' }),
           { id: conversationId, sourceUrl },
         );
         warnings.push('Shared conversation link — read from the conversation JSON embedded in the page.');
-      } else {
-        warnings.push('Shared conversation link — the backend API is not reachable here, '
-          + 'so the page itself was read instead.');
+      } else if (!apiResult) {
+        warnings.push(`Shared conversation link — the share API failed (${
+          shareErr && shareErr.message ? shareErr.message : shareErr}), so the page itself was read instead.`);
       }
     } else if (!conversationId) {
       warnings.push('Could not find a conversation id in the URL; the page itself was read instead.');
@@ -234,6 +246,7 @@ export {
   nodeToMessage,
   renderContent,
   extractViaApi,
+  extractShareViaApi,
   scrapeConversation,
   collectTurns,
   turnToMessage,

@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Nothing yet._
 
+## [0.1.1] — 2026-11-10
+
+### Fixed
+
+- **ChatGPT: chats someone else shared with you (`/share/<id>`) could not be downloaded.**
+  ChatGPT stopped inlining the conversation JSON on share pages and now loads it from
+  `/backend-api/share/<id>`; the page DOM carried no turns either, so every path came up
+  empty. The extension now reads that endpoint. It sends the request without cookies first —
+  with the viewer's cookies the backend binds the call to *their* workspace and answers 401 —
+  and retries with the bearer token only if the anonymous call is refused. The embedded-JSON
+  and DOM paths remain as fallbacks.
+
 ## [0.1.0] — 2026-08-26
 
 First release. Exports a full ChatGPT conversation to a Markdown file.
@@ -53,5 +65,6 @@ First release. Exports a full ChatGPT conversation to a Markdown file.
   `<all_urls>`, no wildcard host patterns.
 - No data collection, no analytics, no telemetry, no network egress to any third party.
 
-[Unreleased]: https://github.com/hardelele/gpt-download-chat/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/hardelele/gpt-download-chat/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/hardelele/gpt-download-chat/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/hardelele/gpt-download-chat/releases/tag/v0.1.0

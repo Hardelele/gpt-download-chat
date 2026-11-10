@@ -53,8 +53,15 @@ real filename), `thoughts`/`reasoning_recap` → `contentType:'thoughts'`, `exec
 and anything unknown → `'other'` with a best-effort string. `model` is the `model_slug` of the
 last assistant message that has one.
 
-**Path 1b — embedded JSON.** `/share/` pages have no reachable endpoint, but the server inlines
-the same conversation JSON in a `<script>`. `findEmbeddedPayload(document)` digs it out
+**Path 1a — share snapshot API.** `/share/` pages load their snapshot from
+`GET /backend-api/share/<id>` (same `mapping`/`current_node` shape; verified live 2026-11).
+`/backend-api/conversation/<id>` answers 404 `conversation_inaccessible` to anyone but the
+owner. The share call goes out with `credentials:'omit'` first: **with the viewer's cookies
+it is bound to their workspace and answers 401** — that was the "someone else's shared chat
+won't download" bug. A bearer-token retry follows only if the anonymous call is refused.
+
+**Path 1b — embedded JSON (legacy).** Older share pages inlined
+the same conversation JSON in a `<script>`; current ones do not. `findEmbeddedPayload(document)` digs it out
 (depth-limited search for an object with a non-empty `mapping`), so shared links export at full
 fidelity — timestamps, model, branch structure — instead of being scraped. The same recovery
 runs if the API call fails on a normal `/c/` page.
